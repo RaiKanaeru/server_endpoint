@@ -1,18 +1,18 @@
-console.log('🚀 ABSENTA Modern Server Starting...');
+console.log("🚀 ABSENTA Modern Server Starting...");
 
-import express from 'express';
-import mysql from 'mysql2/promise';
-import cors from 'cors';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import cookieParser from 'cookie-parser';
-import ExcelJS from 'exceljs';
+import express from "express";
+import mysql from "mysql2/promise";
+import cors from "cors";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import cookieParser from "cookie-parser";
+import ExcelJS from "exceljs";
 
 // Configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'absenta-super-secret-key-2025';
+const JWT_SECRET = process.env.JWT_SECRET || "absenta-super-secret-key-2025";
 const saltRounds = 10;
 const PORT = process.env.PORT || 3001;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const NODE_ENV = process.env.NODE_ENV || "development";
 
 const app = express();
 const port = PORT;
@@ -20,75 +20,107 @@ const port = PORT;
 // Middleware setup
 const corsOptions = {
     credentials: true, 
-    origin: NODE_ENV === 'production' 
-        ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://your-domain.com'])
-        : ['http://localhost:8080', 'http://localhost:8081', 'http://localhost:5173', 'http://localhost:3000']
+  origin:
+    NODE_ENV === "production"
+      ? process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(",")
+        : ["*"] // Allow all origins in production for now
+      : [
+          "http://localhost:8080",
+          "http://localhost:8081",
+          "http://localhost:5173",
+          "http://localhost:3000",
+        ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  // Log request details
+  console.log(
+    `📥 ${req.method} ${req.path} from ${req.ip || "unknown"} - ${
+      req.headers["user-agent"] || "no-user-agent"
+    }`
+  );
+
+  // Log response
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    console.log(
+      `📤 ${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`
+    );
+  });
+
+  next();
+});
+
 // ================================================
 // DATABASE CONNECTION - Railway MySQL Connection
 // ================================================
 const dbConfig = {
-    host: 'yamanote.proxy.rlwy.net',
-    user: 'root',
-    password: 'usATJlMlcXFdBQXItubknzxokYiUWcci',
-    database: 'railway',
+  host: "yamanote.proxy.rlwy.net",
+  user: "root",
+  password: "usATJlMlcXFdBQXItubknzxokYiUWcci",
+  database: "railway",
     port: 23022,
     connectTimeout: 10000,
     reconnect: true,
-    ssl: false
+  ssl: false,
 };
 
 // Alternative configuration using environment variables if available
 const getDbConfig = () => {
     return {
-        host: process.env.MYSQLHOST || 'yamanote.proxy.rlwy.net',
-        user: process.env.MYSQLUSER || 'root',
-        password: process.env.MYSQLPASSWORD || 'usATJlMlcXFdBQXItubknzxokYiUWcci',
-        database: process.env.MYSQLDATABASE || 'railway',
+    host: process.env.MYSQLHOST || "yamanote.proxy.rlwy.net",
+    user: process.env.MYSQLUSER || "root",
+    password: process.env.MYSQLPASSWORD || "usATJlMlcXFdBQXItubknzxokYiUWcci",
+    database: process.env.MYSQLDATABASE || "railway",
         port: process.env.MYSQLPORT || 23022,
         connectTimeout: 10000,
         reconnect: true,
-        ssl: false
+    ssl: false,
     };
 };
 
 let connection;
 
 async function connectToDatabase() {
-    console.log('🔄 Connecting to Railway MySQL database...');
+  console.log("🔄 Connecting to Railway MySQL database...");
     try {
         // Use environment variables if available, otherwise use default config
         const config = getDbConfig();
-        console.log('🔧 Database config:', {
+    console.log("🔧 Database config:", {
             host: config.host,
             user: config.user,
             database: config.database,
-            port: config.port
+      port: config.port,
         });
         
         connection = await mysql.createConnection(config);
-        console.log('✅ Successfully connected to Railway MySQL database');
+    console.log("✅ Successfully connected to Railway MySQL database");
 
         // Test connection
-        await connection.execute('SELECT 1');
-        console.log('✅ Database connection test successful');
+    await connection.execute("SELECT 1");
+    console.log("✅ Database connection test successful");
 
-        connection.on('error', err => {
-            console.error('❌ Database connection error:', err);
-            if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-                console.log('🔄 Connection lost, attempting to reconnect...');
+    connection.on("error", (err) => {
+      console.error("❌ Database connection error:", err);
+      if (err.code === "PROTOCOL_CONNECTION_LOST") {
+        console.log("🔄 Connection lost, attempting to reconnect...");
                 connectToDatabase();
             }
         });
-
     } catch (error) {
-        console.error('❌ Failed to connect to Railway database:', error.message);
-        console.log('🔄 Retrying connection in 5 seconds...');
+    console.error("❌ Failed to connect to Railway database:", error.message);
+    console.log("🔄 Retrying connection in 5 seconds...");
         setTimeout(connectToDatabase, 5000);
     }
 }
@@ -97,18 +129,39 @@ async function connectToDatabase() {
 // MIDDLEWARE - JWT Authentication & Authorization
 // ================================================
 function authenticateToken(req, res, next) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1] || req.cookies.token;
+  const authHeader = req.headers["authorization"];
+  const token = (authHeader && authHeader.split(" ")[1]) || req.cookies.token;
     
     if (!token) {
-        console.log('❌ Access denied: No token provided');
-        return res.status(401).json({ error: 'Access token required' });
+    // Log more details about the request
+    console.log(
+      `❌ Access denied: No token provided for ${req.method} ${req.path} from ${
+        req.ip || "unknown"
+      }`
+    );
+    console.log(`📋 Request headers:`, {
+      "user-agent": req.headers["user-agent"],
+      origin: req.headers["origin"],
+      referer: req.headers["referer"],
+    });
+
+    // Don't return error for health check endpoints
+    if (req.path === "/health" || req.path === "/api/health") {
+      return next();
+    }
+
+    return res.status(401).json({
+      error: "Access token required",
+      message: "This endpoint requires authentication. Please login first.",
+      path: req.path,
+      method: req.method,
+    });
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
-            console.log('❌ Token verification failed:', err.message);
-            return res.status(403).json({ error: 'Invalid or expired token' });
+      console.log("❌ Token verification failed:", err.message);
+      return res.status(403).json({ error: "Invalid or expired token" });
         }
         console.log(`✅ Token verified for user: ${user.username} (${user.role})`);
         req.user = user;
@@ -120,25 +173,71 @@ function authenticateToken(req, res, next) {
 function requireRole(roles) {
     return (req, res, next) => {
         if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ error: 'Insufficient permissions' });
+      return res.status(403).json({ error: "Insufficient permissions" });
         }
         next();
     };
 }
 
 // ================================================
+// PUBLIC ENDPOINTS - No Authentication Required
+// ================================================
+
+// Public health check endpoint for monitoring
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: NODE_ENV,
+    database: connection ? "connected" : "disconnected",
+  });
+});
+
+// Alternative health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    service: "ABSENTA Server",
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: NODE_ENV,
+    database: connection ? "connected" : "disconnected",
+    endpoints: {
+      health: "/health",
+      login: "/api/login",
+      verify: "/api/verify",
+    },
+  });
+});
+
+// Server status endpoint
+app.get("/status", (req, res) => {
+  res.json({
+    server: "ABSENTA Modern Server",
+    status: "running",
+    port: port,
+    environment: NODE_ENV,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ================================================
 // AUTHENTICATION ENDPOINTS
 // ================================================
 
 // Login endpoint - Real authentication with MySQL
-app.post('/api/login', async (req, res) => {
+app.post("/api/login", async (req, res) => {
     try {
         const { username, password } = req.body;
         
         console.log(`🔐 Login attempt for username: ${username}`);
         
         if (!username || !password) {
-            return res.status(400).json({ error: 'Username and password are required' });
+      return res
+        .status(400)
+        .json({ error: "Username and password are required" });
         }
 
         // Query user from database
@@ -148,8 +247,8 @@ app.post('/api/login', async (req, res) => {
         );
 
         if (rows.length === 0) {
-            console.log('❌ Login failed: User not found');
-            return res.status(401).json({ error: 'Invalid username or password' });
+      console.log("❌ Login failed: User not found");
+      return res.status(401).json({ error: "Invalid username or password" });
         }
 
         const user = rows[0];
@@ -158,14 +257,14 @@ app.post('/api/login', async (req, res) => {
         const passwordMatch = await bcrypt.compare(password, user.password);
         
         if (!passwordMatch) {
-            console.log('❌ Login failed: Invalid password');
-            return res.status(401).json({ error: 'Invalid username or password' });
+      console.log("❌ Login failed: Invalid password");
+      return res.status(401).json({ error: "Invalid username or password" });
         }
 
         // Get additional user data based on role
         let additionalData = {};
         
-        if (user.role === 'guru') {
+    if (user.role === "guru") {
             const [guruData] = await connection.execute(
                 `SELECT g.*, m.nama_mapel 
                  FROM guru g 
@@ -177,10 +276,10 @@ app.post('/api/login', async (req, res) => {
                 additionalData = {
                     guru_id: guruData[0].id_guru,
                     nip: guruData[0].nip,
-                    mapel: guruData[0].nama_mapel
+          mapel: guruData[0].nama_mapel,
                 };
             }
-        } else if (user.role === 'siswa') {
+    } else if (user.role === "siswa") {
             const [siswaData] = await connection.execute(
                 `SELECT sp.*, k.nama_kelas 
                  FROM siswa_perwakilan sp 
@@ -193,7 +292,7 @@ app.post('/api/login', async (req, res) => {
                     siswa_id: siswaData[0].id_siswa,
                     nis: siswaData[0].nis,
                     kelas: siswaData[0].nama_kelas,
-                    kelas_id: siswaData[0].kelas_id
+          kelas_id: siswaData[0].kelas_id,
                 };
             }
         }
@@ -204,47 +303,118 @@ app.post('/api/login', async (req, res) => {
             username: user.username,
             nama: user.nama,
             role: user.role,
-            ...additionalData
+      ...additionalData,
         };
 
-        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
 
         // Set cookie and return response
-        res.cookie('token', token, { 
+    res.cookie("token", token, {
             httpOnly: true, 
-            secure: NODE_ENV === 'production', // Set to true in production with HTTPS
-            maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      secure: NODE_ENV === "production", // Set to true in production with HTTPS
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
         });
 
-        console.log(`✅ Login successful for user: ${user.username} (${user.role})`);
+    console.log(
+      `✅ Login successful for user: ${user.username} (${user.role})`
+    );
         
         res.json({
             success: true,
-            message: 'Login successful',
+      message: "Login successful",
             user: tokenPayload,
-            token
+      token,
         });
-
     } catch (error) {
-        console.error('❌ Login error:', error);
-        res.status(500).json({ error: 'Internal server error during login' });
+    console.error("❌ Login error:", error);
+    res.status(500).json({ error: "Internal server error during login" });
     }
 });
 
 // Logout endpoint
-app.post('/api/logout', (req, res) => {
-    res.clearCookie('token');
-    console.log('✅ User logged out successfully');
-    res.json({ success: true, message: 'Logged out successfully' });
+app.post("/api/logout", (req, res) => {
+  res.clearCookie("token");
+  console.log("✅ User logged out successfully");
+  res.json({ success: true, message: "Logged out successfully" });
 });
 
 // Verify token endpoint
-app.get('/api/verify', authenticateToken, (req, res) => {
+app.get("/api/verify", authenticateToken, (req, res) => {
     res.json({ 
         success: true, 
         user: req.user,
-        message: 'Token is valid'
+    message: "Token is valid",
     });
+});
+
+// Public server info endpoint
+app.get("/api/info", (req, res) => {
+  res.json({
+    service: "ABSENTA - Sistem Absensi SMKN 13 Bandung",
+    version: "1.0.0",
+    description: "Sistem absensi modern dengan validasi siswa-guru real-time",
+    features: [
+      "Student-Teacher Validation System",
+      "Real-time Attendance Tracking",
+      "Excel Export Reports",
+      "Mobile-First Interface",
+      "JWT Authentication",
+      "MySQL Database",
+    ],
+    endpoints: {
+      public: [
+        "/health",
+        "/api/health",
+        "/status",
+        "/api/info",
+        "/api/db-test",
+      ],
+      auth: ["/api/login", "/api/logout", "/api/verify"],
+      protected: [
+        "/api/dashboard/*",
+        "/api/admin/*",
+        "/api/guru/*",
+        "/api/siswa/*",
+      ],
+    },
+    timestamp: new Date().toISOString(),
+    environment: NODE_ENV,
+  });
+});
+
+// Database connection test endpoint (public)
+app.get("/api/db-test", async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({
+        status: "error",
+        message: "Database not connected",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Test database connection
+    await connection.execute("SELECT 1 as test");
+
+    res.json({
+      status: "success",
+      message: "Database connection successful",
+      database: {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        database: dbConfig.database,
+        connected: true,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Database connection failed",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // ================================================
@@ -265,11 +435,11 @@ app.get('/api/verify', authenticateToken, (req, res) => {
 // }); // DUPLICATE ENDPOINT - COMMENTED OUT
 
 // Get dashboard statistics
-app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
+app.get("/api/dashboard/stats", authenticateToken, async (req, res) => {
     try {
         const stats = {};
         
-        if (req.user.role === 'admin') {
+    if (req.user.role === "admin") {
             // Admin statistics
             const [totalSiswa] = await connection.execute(
                 'SELECT COUNT(*) as count FROM siswa_perwakilan WHERE status = "aktif"'
@@ -288,7 +458,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
             );
             
             const [absensiHariIni] = await connection.execute(
-                'SELECT COUNT(*) as count FROM absensi_guru WHERE tanggal = CURDATE()'
+        "SELECT COUNT(*) as count FROM absensi_guru WHERE tanggal = CURDATE()"
             );
             
             const [persentaseKehadiran] = await connection.execute(
@@ -306,8 +476,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
             stats.totalMapel = totalMapel[0].count;
             stats.absensiHariIni = absensiHariIni[0].count;
             stats.persentaseKehadiran = persentaseKehadiran[0].persentase || 0;
-            
-        } else if (req.user.role === 'guru') {
+    } else if (req.user.role === "guru") {
             // Guru statistics
             const [jadwalHariIni] = await connection.execute(
                 `SELECT COUNT(*) as count 
@@ -336,8 +505,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
             stats.jadwalHariIni = jadwalHariIni[0].count;
             stats.absensiMingguIni = absensiMingguIni[0].count;
             stats.persentaseKehadiran = persentaseKehadiran[0].persentase || 0;
-            
-        } else if (req.user.role === 'siswa') {
+    } else if (req.user.role === "siswa") {
             // Siswa statistics
             const [jadwalHariIni] = await connection.execute(
                 `SELECT COUNT(*) as count 
@@ -357,22 +525,23 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
             stats.absensiMingguIni = absensiMingguIni[0].count;
         }
 
-        console.log(`📊 Dashboard stats retrieved for ${req.user.role}: ${req.user.username}`);
+    console.log(
+      `📊 Dashboard stats retrieved for ${req.user.role}: ${req.user.username}`
+    );
         res.json({ success: true, data: stats });
-
     } catch (error) {
-        console.error('❌ Dashboard stats error:', error);
-        res.status(500).json({ error: 'Failed to retrieve dashboard statistics' });
+    console.error("❌ Dashboard stats error:", error);
+    res.status(500).json({ error: "Failed to retrieve dashboard statistics" });
     }
 });
 
 // Get dashboard chart data
-app.get('/api/dashboard/chart', authenticateToken, async (req, res) => {
+app.get("/api/dashboard/chart", authenticateToken, async (req, res) => {
     try {
-        const { period = '7days' } = req.query;
+    const { period = "7days" } = req.query;
         let chartData = [];
 
-        if (req.user.role === 'admin') {
+    if (req.user.role === "admin") {
             // Admin chart - Weekly attendance overview
             const [weeklyData] = await connection.execute(
                 `SELECT 
@@ -385,14 +554,13 @@ app.get('/api/dashboard/chart', authenticateToken, async (req, res) => {
                  ORDER BY tanggal`
             );
 
-            chartData = weeklyData.map(row => ({
+      chartData = weeklyData.map((row) => ({
                 date: row.tanggal,
                 hadir: row.hadir,
                 tidakHadir: row.tidak_hadir,
-                total: row.hadir + row.tidak_hadir
+        total: row.hadir + row.tidak_hadir,
             }));
-
-        } else if (req.user.role === 'guru') {
+    } else if (req.user.role === "guru") {
             // Guru chart - Personal attendance
             const [personalData] = await connection.execute(
                 `SELECT 
@@ -406,19 +574,20 @@ app.get('/api/dashboard/chart', authenticateToken, async (req, res) => {
                 [req.user.guru_id]
             );
 
-            chartData = personalData.map(row => ({
+      chartData = personalData.map((row) => ({
                 date: row.tanggal,
                 hadir: row.hadir,
-                tidakHadir: row.tidak_hadir
+        tidakHadir: row.tidak_hadir,
             }));
         }
 
-        console.log(`📈 Chart data retrieved for ${req.user.role}: ${req.user.username}`);
+    console.log(
+      `📈 Chart data retrieved for ${req.user.role}: ${req.user.username}`
+    );
         res.json({ success: true, data: chartData });
-
     } catch (error) {
-        console.error('❌ Chart data error:', error);
-        res.status(500).json({ error: 'Failed to retrieve chart data' });
+    console.error("❌ Chart data error:", error);
+    res.status(500).json({ error: "Failed to retrieve chart data" });
     }
 });
 
@@ -427,9 +596,13 @@ app.get('/api/dashboard/chart', authenticateToken, async (req, res) => {
 // ================================================
 
 // SISWA CRUD
-app.get('/api/admin/siswa', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/siswa",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '' } = req.query;
+      const { page = 1, limit = 10, search = "" } = req.query;
         const offset = (page - 1) * limit;
 
         let query = `
@@ -438,20 +611,26 @@ app.get('/api/admin/siswa', authenticateToken, requireRole(['admin']), async (re
             JOIN kelas k ON sp.kelas_id = k.id_kelas
             JOIN users u ON sp.user_id = u.id
         `;
-        let countQuery = 'SELECT COUNT(*) as total FROM siswa_perwakilan sp JOIN kelas k ON sp.kelas_id = k.id_kelas JOIN users u ON sp.user_id = u.id';
+      let countQuery =
+        "SELECT COUNT(*) as total FROM siswa_perwakilan sp JOIN kelas k ON sp.kelas_id = k.id_kelas JOIN users u ON sp.user_id = u.id";
         let params = [];
 
         if (search) {
-            query += ' WHERE (sp.nama LIKE ? OR sp.nis LIKE ? OR k.nama_kelas LIKE ?)';
-            countQuery += ' WHERE (sp.nama LIKE ? OR sp.nis LIKE ? OR k.nama_kelas LIKE ?)';
+        query +=
+          " WHERE (sp.nama LIKE ? OR sp.nis LIKE ? OR k.nama_kelas LIKE ?)";
+        countQuery +=
+          " WHERE (sp.nama LIKE ? OR sp.nis LIKE ? OR k.nama_kelas LIKE ?)";
             params = [`%${search}%`, `%${search}%`, `%${search}%`];
         }
 
-        query += ' ORDER BY sp.created_at DESC LIMIT ? OFFSET ?';
+      query += " ORDER BY sp.created_at DESC LIMIT ? OFFSET ?";
         params.push(parseInt(limit), parseInt(offset));
 
         const [rows] = await connection.execute(query, params);
-        const [countResult] = await connection.execute(countQuery, search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []);
+      const [countResult] = await connection.execute(
+        countQuery,
+        search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []
+      );
 
         res.json({
             success: true,
@@ -460,16 +639,21 @@ app.get('/api/admin/siswa', authenticateToken, requireRole(['admin']), async (re
                 current_page: parseInt(page),
                 per_page: parseInt(limit),
                 total: countResult[0].total,
-                total_pages: Math.ceil(countResult[0].total / limit)
-            }
+          total_pages: Math.ceil(countResult[0].total / limit),
+        },
         });
     } catch (error) {
-        console.error('❌ Get siswa error:', error);
-        res.status(500).json({ error: 'Failed to retrieve student data' });
+      console.error("❌ Get siswa error:", error);
+      res.status(500).json({ error: "Failed to retrieve student data" });
     }
-});
+  }
+);
 
-app.post('/api/admin/siswa', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/siswa",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { nis, nama, kelas_id, username, password, jabatan } = req.body;
 
@@ -488,30 +672,40 @@ app.post('/api/admin/siswa', authenticateToken, requireRole(['admin']), async (r
         // Create siswa_perwakilan record
         await connection.execute(
             'INSERT INTO siswa_perwakilan (nis, nama, kelas_id, user_id, jabatan, status) VALUES (?, ?, ?, ?, ?, "aktif")',
-            [nis, nama, kelas_id, userResult.insertId, jabatan || 'Sekretaris Kelas']
+        [
+          nis,
+          nama,
+          kelas_id,
+          userResult.insertId,
+          jabatan || "Sekretaris Kelas",
+        ]
         );
 
         await connection.commit();
 
         console.log(`✅ New siswa created: ${nama} (${nis})`);
-        res.json({ success: true, message: 'Siswa berhasil ditambahkan' });
-
+      res.json({ success: true, message: "Siswa berhasil ditambahkan" });
     } catch (error) {
         await connection.rollback();
-        console.error('❌ Create siswa error:', error);
+      console.error("❌ Create siswa error:", error);
         
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(400).json({ error: 'NIS atau username sudah digunakan' });
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(400).json({ error: "NIS atau username sudah digunakan" });
         } else {
-            res.status(500).json({ error: 'Failed to create student' });
+        res.status(500).json({ error: "Failed to create student" });
         }
     }
-});
+  }
+);
 
 // GURU CRUD
-app.get('/api/admin/guru', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/guru",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '' } = req.query;
+      const { page = 1, limit = 10, search = "" } = req.query;
         const offset = (page - 1) * limit;
 
         let query = `
@@ -520,20 +714,26 @@ app.get('/api/admin/guru', authenticateToken, requireRole(['admin']), async (req
             JOIN mapel m ON g.mapel_id = m.id_mapel
             JOIN users u ON g.user_id = u.id
         `;
-        let countQuery = 'SELECT COUNT(*) as total FROM guru g JOIN mapel m ON g.mapel_id = m.id_mapel JOIN users u ON g.user_id = u.id';
+      let countQuery =
+        "SELECT COUNT(*) as total FROM guru g JOIN mapel m ON g.mapel_id = m.id_mapel JOIN users u ON g.user_id = u.id";
         let params = [];
 
         if (search) {
-            query += ' WHERE (g.nama LIKE ? OR g.nip LIKE ? OR m.nama_mapel LIKE ?)';
-            countQuery += ' WHERE (g.nama LIKE ? OR g.nip LIKE ? OR m.nama_mapel LIKE ?)';
+        query +=
+          " WHERE (g.nama LIKE ? OR g.nip LIKE ? OR m.nama_mapel LIKE ?)";
+        countQuery +=
+          " WHERE (g.nama LIKE ? OR g.nip LIKE ? OR m.nama_mapel LIKE ?)";
             params = [`%${search}%`, `%${search}%`, `%${search}%`];
         }
 
-        query += ' ORDER BY g.created_at DESC LIMIT ? OFFSET ?';
+      query += " ORDER BY g.created_at DESC LIMIT ? OFFSET ?";
         params.push(parseInt(limit), parseInt(offset));
 
         const [rows] = await connection.execute(query, params);
-        const [countResult] = await connection.execute(countQuery, search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []);
+      const [countResult] = await connection.execute(
+        countQuery,
+        search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []
+      );
 
         res.json({
             success: true,
@@ -542,18 +742,24 @@ app.get('/api/admin/guru', authenticateToken, requireRole(['admin']), async (req
                 current_page: parseInt(page),
                 per_page: parseInt(limit),
                 total: countResult[0].total,
-                total_pages: Math.ceil(countResult[0].total / limit)
-            }
+          total_pages: Math.ceil(countResult[0].total / limit),
+        },
         });
     } catch (error) {
-        console.error('❌ Get guru error:', error);
-        res.status(500).json({ error: 'Failed to retrieve teacher data' });
+      console.error("❌ Get guru error:", error);
+      res.status(500).json({ error: "Failed to retrieve teacher data" });
     }
-});
+  }
+);
 
-app.post('/api/admin/guru', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/guru",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { nip, nama, mapel_id, username, password, no_telp, alamat } = req.body;
+      const { nip, nama, mapel_id, username, password, no_telp, alamat } =
+        req.body;
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, saltRounds);
@@ -576,24 +782,28 @@ app.post('/api/admin/guru', authenticateToken, requireRole(['admin']), async (re
         await connection.commit();
 
         console.log(`✅ New guru created: ${nama} (${nip})`);
-        res.json({ success: true, message: 'Guru berhasil ditambahkan' });
-
+      res.json({ success: true, message: "Guru berhasil ditambahkan" });
     } catch (error) {
         await connection.rollback();
-        console.error('❌ Create guru error:', error);
+      console.error("❌ Create guru error:", error);
         
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(400).json({ error: 'NIP atau username sudah digunakan' });
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(400).json({ error: "NIP atau username sudah digunakan" });
         } else {
-            res.status(500).json({ error: 'Failed to create teacher' });
+        res.status(500).json({ error: "Failed to create teacher" });
         }
     }
-});
+  }
+);
 
 // MAPEL CRUD
-app.get('/api/admin/mapel', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/mapel",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting subjects for admin dashboard');
+      console.log("📋 Getting subjects for admin dashboard");
         
         const query = `
             SELECT id_mapel as id, kode_mapel, nama_mapel, deskripsi, status
@@ -605,28 +815,42 @@ app.get('/api/admin/mapel', authenticateToken, requireRole(['admin']), async (re
         console.log(`✅ Subjects retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting subjects:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting subjects:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
-app.post('/api/admin/mapel', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/mapel",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { kode_mapel, nama_mapel, deskripsi, status } = req.body;
-        console.log('➕ Adding subject:', { kode_mapel, nama_mapel, deskripsi, status });
+      console.log("➕ Adding subject:", {
+        kode_mapel,
+        nama_mapel,
+        deskripsi,
+        status,
+      });
 
         if (!kode_mapel || !nama_mapel) {
-            return res.status(400).json({ error: 'Kode dan nama mata pelajaran wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Kode dan nama mata pelajaran wajib diisi" });
         }
 
         // Check if kode_mapel already exists
         const [existing] = await connection.execute(
-            'SELECT id_mapel FROM mapel WHERE kode_mapel = ?',
+        "SELECT id_mapel FROM mapel WHERE kode_mapel = ?",
             [kode_mapel]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'Kode mata pelajaran sudah digunakan' });
+        return res
+          .status(409)
+          .json({ error: "Kode mata pelajaran sudah digunakan" });
         }
 
         const insertQuery = `
@@ -638,39 +862,60 @@ app.post('/api/admin/mapel', authenticateToken, requireRole(['admin']), async (r
             kode_mapel, 
             nama_mapel, 
             deskripsi || null,
-            status || 'aktif'
-        ]);
-        console.log('✅ Subject added successfully:', result.insertId);
-        res.json({ message: 'Mata pelajaran berhasil ditambahkan', id: result.insertId });
+        status || "aktif",
+      ]);
+      console.log("✅ Subject added successfully:", result.insertId);
+      res.json({
+        message: "Mata pelajaran berhasil ditambahkan",
+        id: result.insertId,
+      });
     } catch (error) {
-        console.error('❌ Error adding subject:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(409).json({ error: 'Kode mata pelajaran sudah digunakan' });
+      console.error("❌ Error adding subject:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "Kode mata pelajaran sudah digunakan" });
         } else {
-            res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: "Internal server error" });
         }
     }
-});
+  }
+);
 
 // Update subject
-app.put('/api/admin/mapel/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/mapel/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         const { kode_mapel, nama_mapel, deskripsi, status } = req.body;
-        console.log('📝 Updating subject:', { id, kode_mapel, nama_mapel, deskripsi, status });
+      console.log("📝 Updating subject:", {
+        id,
+        kode_mapel,
+        nama_mapel,
+        deskripsi,
+        status,
+      });
 
         if (!kode_mapel || !nama_mapel) {
-            return res.status(400).json({ error: 'Kode dan nama mata pelajaran wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Kode dan nama mata pelajaran wajib diisi" });
         }
 
         // Check if kode_mapel already exists for other records
         const [existing] = await connection.execute(
-            'SELECT id_mapel FROM mapel WHERE kode_mapel = ? AND id_mapel != ?',
+        "SELECT id_mapel FROM mapel WHERE kode_mapel = ? AND id_mapel != ?",
             [kode_mapel, id]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'Kode mata pelajaran sudah digunakan oleh mata pelajaran lain' });
+        return res
+          .status(409)
+          .json({
+            error:
+              "Kode mata pelajaran sudah digunakan oleh mata pelajaran lain",
+          });
         }
 
         const updateQuery = `
@@ -683,49 +928,63 @@ app.put('/api/admin/mapel/:id', authenticateToken, requireRole(['admin']), async
             kode_mapel, 
             nama_mapel, 
             deskripsi || null,
-            status || 'aktif',
-            id
+        status || "aktif",
+        id,
         ]);
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Mata pelajaran tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Mata pelajaran tidak ditemukan" });
         }
 
-        console.log('✅ Subject updated successfully');
-        res.json({ message: 'Mata pelajaran berhasil diupdate' });
+      console.log("✅ Subject updated successfully");
+      res.json({ message: "Mata pelajaran berhasil diupdate" });
     } catch (error) {
-        console.error('❌ Error updating subject:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating subject:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete subject
-app.delete('/api/admin/mapel/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/mapel/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting subject:', { id });
+      console.log("🗑️ Deleting subject:", { id });
 
         const [result] = await connection.execute(
-            'DELETE FROM mapel WHERE id_mapel = ?',
+        "DELETE FROM mapel WHERE id_mapel = ?",
             [id]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Mata pelajaran tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Mata pelajaran tidak ditemukan" });
         }
 
-        console.log('✅ Subject deleted successfully');
-        res.json({ message: 'Mata pelajaran berhasil dihapus' });
+      console.log("✅ Subject deleted successfully");
+      res.json({ message: "Mata pelajaran berhasil dihapus" });
     } catch (error) {
-        console.error('❌ Error deleting subject:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting subject:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // KELAS CRUD
-app.get('/api/admin/kelas', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/kelas",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting classes for admin dashboard');
+      console.log("📋 Getting classes for admin dashboard");
         
         const query = `
             SELECT id_kelas as id, nama_kelas, tingkat, status
@@ -737,54 +996,67 @@ app.get('/api/admin/kelas', authenticateToken, requireRole(['admin']), async (re
         console.log(`✅ Classes retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting classes:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting classes:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
-app.post('/api/admin/kelas', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/kelas",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { nama_kelas } = req.body;
-        console.log('➕ Adding class:', { nama_kelas });
+      console.log("➕ Adding class:", { nama_kelas });
 
         if (!nama_kelas) {
-            return res.status(400).json({ error: 'Nama kelas wajib diisi' });
+        return res.status(400).json({ error: "Nama kelas wajib diisi" });
         }
 
         // Extract tingkat from nama_kelas (contoh: "X IPA 1" -> tingkat = "X")
-        const tingkat = nama_kelas.split(' ')[0];
+      const tingkat = nama_kelas.split(" ")[0];
 
         const insertQuery = `
             INSERT INTO kelas (nama_kelas, tingkat, status) 
             VALUES (?, ?, 'aktif')
         `;
 
-        const [result] = await connection.execute(insertQuery, [nama_kelas, tingkat]);
-        console.log('✅ Class added successfully:', result.insertId);
-        res.json({ message: 'Kelas berhasil ditambahkan', id: result.insertId });
+      const [result] = await connection.execute(insertQuery, [
+        nama_kelas,
+        tingkat,
+      ]);
+      console.log("✅ Class added successfully:", result.insertId);
+      res.json({ message: "Kelas berhasil ditambahkan", id: result.insertId });
     } catch (error) {
-        console.error('❌ Error adding class:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(409).json({ error: 'Nama kelas sudah ada' });
+      console.error("❌ Error adding class:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "Nama kelas sudah ada" });
         } else {
-            res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: "Internal server error" });
         }
     }
-});
+  }
+);
 
 // Update class
-app.put('/api/admin/kelas/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/kelas/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         const { nama_kelas } = req.body;
-        console.log('📝 Updating class:', { id, nama_kelas });
+      console.log("📝 Updating class:", { id, nama_kelas });
 
         if (!nama_kelas) {
-            return res.status(400).json({ error: 'Nama kelas wajib diisi' });
+        return res.status(400).json({ error: "Nama kelas wajib diisi" });
         }
 
         // Extract tingkat from nama_kelas
-        const tingkat = nama_kelas.split(' ')[0];
+      const tingkat = nama_kelas.split(" ")[0];
 
         const updateQuery = `
             UPDATE kelas 
@@ -792,51 +1064,65 @@ app.put('/api/admin/kelas/:id', authenticateToken, requireRole(['admin']), async
             WHERE id_kelas = ?
         `;
 
-        const [result] = await connection.execute(updateQuery, [nama_kelas, tingkat, id]);
+      const [result] = await connection.execute(updateQuery, [
+        nama_kelas,
+        tingkat,
+        id,
+      ]);
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Kelas tidak ditemukan' });
+        return res.status(404).json({ error: "Kelas tidak ditemukan" });
         }
 
-        console.log('✅ Class updated successfully');
-        res.json({ message: 'Kelas berhasil diupdate' });
+      console.log("✅ Class updated successfully");
+      res.json({ message: "Kelas berhasil diupdate" });
     } catch (error) {
-        console.error('❌ Error updating class:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating class:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete class
-app.delete('/api/admin/kelas/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/kelas/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting class:', { id });
+      console.log("🗑️ Deleting class:", { id });
 
         const [result] = await connection.execute(
-            'DELETE FROM kelas WHERE id_kelas = ?',
+        "DELETE FROM kelas WHERE id_kelas = ?",
             [id]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Kelas tidak ditemukan' });
+        return res.status(404).json({ error: "Kelas tidak ditemukan" });
         }
 
-        console.log('✅ Class deleted successfully');
-        res.json({ message: 'Kelas berhasil dihapus' });
+      console.log("✅ Class deleted successfully");
+      res.json({ message: "Kelas berhasil dihapus" });
     } catch (error) {
-        console.error('❌ Error deleting class:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting class:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // JADWAL ENDPOINTS - Schedule Management
 // ================================================
 
 // Get all schedules with join data
-app.get('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/jadwal",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📅 Getting schedules for admin dashboard');
+      console.log("📅 Getting schedules for admin dashboard");
         
         const query = `
             SELECT 
@@ -867,20 +1153,49 @@ app.get('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (r
         console.log(`✅ Schedules retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting schedules:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting schedules:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Add new schedule
-app.post('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/jadwal",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { kelas_id, mapel_id, guru_id, hari, jam_ke, jam_mulai, jam_selesai } = req.body;
-        console.log('➕ Adding schedule:', { kelas_id, mapel_id, guru_id, hari, jam_ke, jam_mulai, jam_selesai });
+      const {
+        kelas_id,
+        mapel_id,
+        guru_id,
+        hari,
+        jam_ke,
+        jam_mulai,
+        jam_selesai,
+      } = req.body;
+      console.log("➕ Adding schedule:", {
+        kelas_id,
+        mapel_id,
+        guru_id,
+        hari,
+        jam_ke,
+        jam_mulai,
+        jam_selesai,
+      });
 
         // Validation
-        if (!kelas_id || !mapel_id || !guru_id || !hari || !jam_ke || !jam_mulai || !jam_selesai) {
-            return res.status(400).json({ error: 'Semua field wajib diisi' });
+      if (
+        !kelas_id ||
+        !mapel_id ||
+        !guru_id ||
+        !hari ||
+        !jam_ke ||
+        !jam_mulai ||
+        !jam_selesai
+      ) {
+        return res.status(400).json({ error: "Semua field wajib diisi" });
         }
 
         // Check for schedule conflicts - same class, day, and time slot
@@ -891,7 +1206,11 @@ app.post('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (
         );
 
         if (conflicts.length > 0) {
-            return res.status(400).json({ error: `Kelas sudah memiliki jadwal pada ${hari} jam ke-${jam_ke}` });
+        return res
+          .status(400)
+          .json({
+            error: `Kelas sudah memiliki jadwal pada ${hari} jam ke-${jam_ke}`,
+          });
         }
 
         // Check teacher availability - same day and time slot
@@ -902,7 +1221,11 @@ app.post('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (
         );
 
         if (teacherConflicts.length > 0) {
-            return res.status(400).json({ error: `Guru sudah memiliki jadwal mengajar pada ${hari} jam ke-${jam_ke}` });
+        return res
+          .status(400)
+          .json({
+            error: `Guru sudah memiliki jadwal mengajar pada ${hari} jam ke-${jam_ke}`,
+          });
         }
 
         const [result] = await connection.execute(
@@ -911,27 +1234,57 @@ app.post('/api/admin/jadwal', authenticateToken, requireRole(['admin']), async (
             [kelas_id, mapel_id, guru_id, hari, jam_ke, jam_mulai, jam_selesai]
         );
 
-        console.log('✅ Schedule added successfully');
+      console.log("✅ Schedule added successfully");
         res.json({ 
-            message: 'Jadwal berhasil ditambahkan',
-            id: result.insertId 
+        message: "Jadwal berhasil ditambahkan",
+        id: result.insertId,
         });
     } catch (error) {
-        console.error('❌ Error adding schedule:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error adding schedule:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Update schedule
-app.put('/api/admin/jadwal/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/jadwal/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        const { kelas_id, mapel_id, guru_id, hari, jam_ke, jam_mulai, jam_selesai } = req.body;
-        console.log('✏️ Updating schedule:', { id, kelas_id, mapel_id, guru_id, hari, jam_ke, jam_mulai, jam_selesai });
+      const {
+        kelas_id,
+        mapel_id,
+        guru_id,
+        hari,
+        jam_ke,
+        jam_mulai,
+        jam_selesai,
+      } = req.body;
+      console.log("✏️ Updating schedule:", {
+        id,
+        kelas_id,
+        mapel_id,
+        guru_id,
+        hari,
+        jam_ke,
+        jam_mulai,
+        jam_selesai,
+      });
 
         // Validation
-        if (!kelas_id || !mapel_id || !guru_id || !hari || !jam_ke || !jam_mulai || !jam_selesai) {
-            return res.status(400).json({ error: 'Semua field wajib diisi' });
+      if (
+        !kelas_id ||
+        !mapel_id ||
+        !guru_id ||
+        !hari ||
+        !jam_ke ||
+        !jam_mulai ||
+        !jam_selesai
+      ) {
+        return res.status(400).json({ error: "Semua field wajib diisi" });
         }
 
         // Check for schedule conflicts (excluding current schedule)
@@ -942,7 +1295,11 @@ app.put('/api/admin/jadwal/:id', authenticateToken, requireRole(['admin']), asyn
         );
 
         if (conflicts.length > 0) {
-            return res.status(400).json({ error: `Kelas sudah memiliki jadwal pada ${hari} jam ke-${jam_ke}` });
+        return res
+          .status(400)
+          .json({
+            error: `Kelas sudah memiliki jadwal pada ${hari} jam ke-${jam_ke}`,
+          });
         }
 
         // Check teacher availability (excluding current schedule)
@@ -953,7 +1310,11 @@ app.put('/api/admin/jadwal/:id', authenticateToken, requireRole(['admin']), asyn
         );
 
         if (teacherConflicts.length > 0) {
-            return res.status(400).json({ error: `Guru sudah memiliki jadwal mengajar pada ${hari} jam ke-${jam_ke}` });
+        return res
+          .status(400)
+          .json({
+            error: `Guru sudah memiliki jadwal mengajar pada ${hari} jam ke-${jam_ke}`,
+          });
         }
 
         const [result] = await connection.execute(
@@ -964,42 +1325,52 @@ app.put('/api/admin/jadwal/:id', authenticateToken, requireRole(['admin']), asyn
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+        return res.status(404).json({ error: "Jadwal tidak ditemukan" });
         }
 
-        console.log('✅ Schedule updated successfully');
-        res.json({ message: 'Jadwal berhasil diperbarui' });
+      console.log("✅ Schedule updated successfully");
+      res.json({ message: "Jadwal berhasil diperbarui" });
     } catch (error) {
-        console.error('❌ Error updating schedule:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating schedule:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete schedule  
-app.delete('/api/admin/jadwal/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/jadwal/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting schedule:', { id });
+      console.log("🗑️ Deleting schedule:", { id });
 
         const [result] = await connection.execute(
-            'DELETE FROM jadwal WHERE id_jadwal = ?',
+        "DELETE FROM jadwal WHERE id_jadwal = ?",
             [id]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+        return res.status(404).json({ error: "Jadwal tidak ditemukan" });
         }
 
-        console.log('✅ Schedule deleted successfully');
-        res.json({ message: 'Jadwal berhasil dihapus' });
+      console.log("✅ Schedule deleted successfully");
+      res.json({ message: "Jadwal berhasil dihapus" });
     } catch (error) {
-        console.error('❌ Error deleting schedule:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting schedule:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get students for a specific schedule (class)
-app.get('/api/schedule/:id/students', authenticateToken, requireRole(['guru', 'admin']), async (req, res) => {
+app.get(
+  "/api/schedule/:id/students",
+  authenticateToken,
+  requireRole(["guru", "admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         console.log(`👥 Getting students for schedule ID: ${id}`);
@@ -1011,11 +1382,11 @@ app.get('/api/schedule/:id/students', authenticateToken, requireRole(['guru', 'a
         );
 
         if (scheduleData.length === 0) {
-            return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+        return res.status(404).json({ error: "Jadwal tidak ditemukan" });
         }
 
         const kelasId = scheduleData[0].kelas_id;
-        const currentDate = new Date().toISOString().split('T')[0];
+      const currentDate = new Date().toISOString().split("T")[0];
 
         // Get all students in the class with their existing attendance for today
         const [students] = await connection.execute(
@@ -1040,24 +1411,33 @@ app.get('/api/schedule/:id/students', authenticateToken, requireRole(['guru', 'a
             [id, currentDate, kelasId]
         );
 
-        console.log(`✅ Found ${students.length} students for schedule ${id} (class ${kelasId}) with attendance data`);
+      console.log(
+        `✅ Found ${students.length} students for schedule ${id} (class ${kelasId}) with attendance data`
+      );
         res.json(students);
     } catch (error) {
-        console.error('❌ Error getting students for schedule:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting students for schedule:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Submit attendance for a schedule
-app.post('/api/attendance/submit', authenticateToken, requireRole(['guru', 'admin']), async (req, res) => {
+app.post(
+  "/api/attendance/submit",
+  authenticateToken,
+  requireRole(["guru", "admin"]),
+  async (req, res) => {
     try {
         const { scheduleId, attendance, notes, guruId } = req.body;
         
         if (!scheduleId || !attendance || !guruId) {
-            return res.status(400).json({ error: 'Data absensi tidak lengkap' });
+        return res.status(400).json({ error: "Data absensi tidak lengkap" });
         }
 
-        console.log(`📝 Submitting attendance for schedule ${scheduleId} by teacher ${guruId}`);
+      console.log(
+        `📝 Submitting attendance for schedule ${scheduleId} by teacher ${guruId}`
+      );
         console.log(`📊 Attendance data:`, JSON.stringify(attendance, null, 2));
         console.log(`📝 Notes data:`, JSON.stringify(notes, null, 2));
 
@@ -1068,7 +1448,7 @@ app.post('/api/attendance/submit', authenticateToken, requireRole(['guru', 'admi
         );
 
         if (scheduleData.length === 0) {
-            return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+        return res.status(404).json({ error: "Jadwal tidak ditemukan" });
         }
 
         const kelasId = scheduleData[0].kelas_id;
@@ -1076,73 +1456,98 @@ app.post('/api/attendance/submit', authenticateToken, requireRole(['guru', 'admi
 
         // Insert attendance records for each student
         const attendanceEntries = Object.entries(attendance);
-        const currentDate = new Date().toISOString().split('T')[0];
+      const currentDate = new Date().toISOString().split("T")[0];
         const currentTime = new Date().toISOString().slice(11, 19);
 
         for (const [studentId, status] of attendanceEntries) {
-            const note = notes[studentId] || '';
+        const note = notes[studentId] || "";
             
-            console.log(`👤 Processing student ${studentId}: status="${status}", note="${note}"`);
+        console.log(
+          `👤 Processing student ${studentId}: status="${status}", note="${note}"`
+        );
             
             // Check if attendance already exists for today
             const [existingAttendance] = await connection.execute(
-                'SELECT id, status as current_status FROM absensi_siswa WHERE siswa_id = ? AND jadwal_id = ? AND tanggal = ?',
+          "SELECT id, status as current_status FROM absensi_siswa WHERE siswa_id = ? AND jadwal_id = ? AND tanggal = ?",
                 [studentId, scheduleId, currentDate]
             );
 
             if (existingAttendance.length > 0) {
                 const existingId = existingAttendance[0].id;
                 const currentStatus = existingAttendance[0].current_status;
-                console.log(`🔄 Updating existing attendance ID ${existingId} from "${currentStatus}" to "${status}"`);
+          console.log(
+            `🔄 Updating existing attendance ID ${existingId} from "${currentStatus}" to "${status}"`
+          );
                 
                 // Update existing attendance
                 const [updateResult] = await connection.execute(
-                    'UPDATE absensi_siswa SET status = ?, keterangan = ?, waktu_absen = ? WHERE id = ?',
+            "UPDATE absensi_siswa SET status = ?, keterangan = ?, waktu_absen = ? WHERE id = ?",
                     [status, note, `${currentDate} ${currentTime}`, existingId]
                 );
                 
-                console.log(`✅ Updated attendance for student ${studentId}: ${updateResult.affectedRows} rows affected`);
+          console.log(
+            `✅ Updated attendance for student ${studentId}: ${updateResult.affectedRows} rows affected`
+          );
             } else {
                 console.log(`➕ Inserting new attendance for student ${studentId}`);
                 
                 // Insert new attendance
                 const [insertResult] = await connection.execute(
-                    'INSERT INTO absensi_siswa (siswa_id, jadwal_id, tanggal, status, keterangan, waktu_absen, guru_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [studentId, scheduleId, currentDate, status, note, `${currentDate} ${currentTime}`, guruId]
-                );
-                
-                console.log(`✅ Inserted new attendance for student ${studentId}: ID ${insertResult.insertId}`);
-            }
-        }
+            "INSERT INTO absensi_siswa (siswa_id, jadwal_id, tanggal, status, keterangan, waktu_absen, guru_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+              studentId,
+              scheduleId,
+              currentDate,
+              status,
+              note,
+              `${currentDate} ${currentTime}`,
+              guruId,
+            ]
+          );
 
-        console.log(`✅ Attendance submitted successfully for ${attendanceEntries.length} students`);
+          console.log(
+            `✅ Inserted new attendance for student ${studentId}: ID ${insertResult.insertId}`
+          );
+        }
+      }
+
+      console.log(
+        `✅ Attendance submitted successfully for ${attendanceEntries.length} students`
+      );
         res.json({ 
-            message: 'Absensi berhasil disimpan',
+        message: "Absensi berhasil disimpan",
             processed: attendanceEntries.length,
             date: currentDate,
-            scheduleId: scheduleId
+        scheduleId: scheduleId,
         });
     } catch (error) {
-        console.error('❌ Error submitting attendance:', error);
+      console.error("❌ Error submitting attendance:", error);
         res.status(500).json({ 
-            error: 'Internal server error: ' + error.message,
-            details: error.stack
+        error: "Internal server error: " + error.message,
+        details: error.stack,
         });
     }
-});
+  }
+);
 
 // ================================================
 // REPORTS ENDPOINTS - Teacher Attendance Reports
 // ================================================
 
 // Update permission request status
-app.put('/api/admin/izin/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/izin/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
 
-        if (!status || !['disetujui', 'ditolak'].includes(status)) {
-            return res.status(400).json({ error: 'Status harus disetujui atau ditolak' });
+      if (!status || !["disetujui", "ditolak"].includes(status)) {
+        return res
+          .status(400)
+          .json({ error: "Status harus disetujui atau ditolak" });
         }
 
         console.log(`🔄 Updating permission request ${id} to ${status}...`);
@@ -1156,21 +1561,28 @@ app.put('/api/admin/izin/:id', authenticateToken, requireRole(['admin']), async 
         const [result] = await connection.execute(query, [status, id]);
         
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Pengajuan izin tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Pengajuan izin tidak ditemukan" });
         }
 
         console.log(`✅ Permission request ${id} updated to ${status}`);
         res.json({ message: `Pengajuan berhasil ${status}` });
     } catch (error) {
-        console.error('❌ Error updating permission request:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating permission request:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get analytics data for dashboard
-app.get('/api/admin/analytics', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/analytics",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📊 Getting analytics dashboard data...');
+      console.log("📊 Getting analytics dashboard data...");
 
         // Get student attendance statistics
         const studentAttendanceQuery = `
@@ -1270,10 +1682,18 @@ app.get('/api/admin/analytics', authenticateToken, requireRole(['admin']), async
             LIMIT 10
         `;
 
-        const [studentAttendance] = await connection.execute(studentAttendanceQuery);
-        const [teacherAttendance] = await connection.execute(teacherAttendanceQuery);
-        const [topAbsentStudents] = await connection.execute(topAbsentStudentsQuery);
-        const [topAbsentTeachers] = await connection.execute(topAbsentTeachersQuery);
+      const [studentAttendance] = await connection.execute(
+        studentAttendanceQuery
+      );
+      const [teacherAttendance] = await connection.execute(
+        teacherAttendanceQuery
+      );
+      const [topAbsentStudents] = await connection.execute(
+        topAbsentStudentsQuery
+      );
+      const [topAbsentTeachers] = await connection.execute(
+        topAbsentTeachersQuery
+      );
         const [notifications] = await connection.execute(notificationsQuery);
 
         const analyticsData = {
@@ -1281,21 +1701,26 @@ app.get('/api/admin/analytics', authenticateToken, requireRole(['admin']), async
             teacherAttendance: teacherAttendance || [],
             topAbsentStudents: topAbsentStudents || [],
             topAbsentTeachers: topAbsentTeachers || [],
-            notifications: notifications || []
+        notifications: notifications || [],
         };
 
         console.log(`✅ Analytics data retrieved successfully`);
         res.json(analyticsData);
     } catch (error) {
-        console.error('❌ Error getting analytics data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting analytics data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get live teacher attendance
-app.get('/api/admin/live-teacher-attendance', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/live-teacher-attendance",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📊 Getting live teacher attendance...');
+      console.log("📊 Getting live teacher attendance...");
 
         const query = `
             SELECT 
@@ -1328,18 +1753,25 @@ app.get('/api/admin/live-teacher-attendance', authenticateToken, requireRole(['a
         `;
         
         const [rows] = await connection.execute(query);
-        console.log(`✅ Live teacher attendance retrieved: ${rows.length} records`);
+      console.log(
+        `✅ Live teacher attendance retrieved: ${rows.length} records`
+      );
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting live teacher attendance:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting live teacher attendance:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get live student attendance
-app.get('/api/admin/live-student-attendance', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/live-student-attendance",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📊 Getting live student attendance...');
+      console.log("📊 Getting live student attendance...");
 
         const query = `
             SELECT 
@@ -1358,22 +1790,35 @@ app.get('/api/admin/live-student-attendance', authenticateToken, requireRole(['a
         `;
         
         const [rows] = await connection.execute(query);
-        console.log(`✅ Live student attendance retrieved: ${rows.length} records`);
+      console.log(
+        `✅ Live student attendance retrieved: ${rows.length} records`
+      );
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting live student attendance:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting live student attendance:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get teacher attendance report
-app.get('/api/admin/teacher-attendance-report', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/teacher-attendance-report",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id } = req.query;
-        console.log('📊 Getting teacher attendance report:', { startDate, endDate, kelas_id });
+      console.log("📊 Getting teacher attendance report:", {
+        startDate,
+        endDate,
+        kelas_id,
+      });
 
         if (!startDate || !endDate) {
-            return res.status(400).json({ error: 'Tanggal mulai dan tanggal selesai wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Tanggal mulai dan tanggal selesai wajib diisi" });
         }
 
         let query = `
@@ -1403,30 +1848,43 @@ app.get('/api/admin/teacher-attendance-report', authenticateToken, requireRole([
         
         const params = [startDate, endDate];
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        query += ' ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke';
+      query += " ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke";
         
         const [rows] = await connection.execute(query, params);
-        console.log(`✅ Teacher attendance report retrieved: ${rows.length} records`);
+      console.log(
+        `✅ Teacher attendance report retrieved: ${rows.length} records`
+      );
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting teacher attendance report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting teacher attendance report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Download teacher attendance report as Excel
-app.get('/api/admin/download-teacher-attendance', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/download-teacher-attendance",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id } = req.query;
-        console.log('📊 Downloading teacher attendance report:', { startDate, endDate, kelas_id });
+      console.log("📊 Downloading teacher attendance report:", {
+        startDate,
+        endDate,
+        kelas_id,
+      });
 
         if (!startDate || !endDate) {
-            return res.status(400).json({ error: 'Tanggal mulai dan tanggal selesai wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Tanggal mulai dan tanggal selesai wajib diisi" });
         }
 
         let query = `
@@ -1456,42 +1914,65 @@ app.get('/api/admin/download-teacher-attendance', authenticateToken, requireRole
         
         const params = [startDate, endDate];
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        query += ' ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke';
+      query += " ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke";
         
         const [rows] = await connection.execute(query, params);
 
         // Enhanced CSV format with UTF-8 BOM for Excel compatibility
-        let csvContent = '\uFEFF'; // UTF-8 BOM
-        csvContent += 'Tanggal,Kelas,Guru,NIP,Mata Pelajaran,Jam Hadir,Jam Mulai,Jam Selesai,Jadwal,Status,Keterangan\n';
-        
-        rows.forEach(row => {
-            csvContent += `"${row.tanggal}","${row.nama_kelas}","${row.nama_guru}","${row.nip_guru || ''}","${row.nama_mapel}","${row.jam_hadir || ''}","${row.jam_mulai}","${row.jam_selesai}","${row.jadwal}","${row.status}","${row.keterangan || ''}"\n`;
-        });
+      let csvContent = "\uFEFF"; // UTF-8 BOM
+      csvContent +=
+        "Tanggal,Kelas,Guru,NIP,Mata Pelajaran,Jam Hadir,Jam Mulai,Jam Selesai,Jadwal,Status,Keterangan\n";
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="laporan-kehadiran-guru-${startDate}-${endDate}.csv"`);
+      rows.forEach((row) => {
+        csvContent += `"${row.tanggal}","${row.nama_kelas}","${
+          row.nama_guru
+        }","${row.nip_guru || ""}","${row.nama_mapel}","${
+          row.jam_hadir || ""
+        }","${row.jam_mulai}","${row.jam_selesai}","${row.jadwal}","${
+          row.status
+        }","${row.keterangan || ""}"\n`;
+      });
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="laporan-kehadiran-guru-${startDate}-${endDate}.csv"`
+      );
         res.send(csvContent);
         
-        console.log(`✅ Teacher attendance report downloaded successfully: ${rows.length} records`);
+      console.log(
+        `✅ Teacher attendance report downloaded successfully: ${rows.length} records`
+      );
     } catch (error) {
-        console.error('❌ Error downloading teacher attendance report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error downloading teacher attendance report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get student attendance report
-app.get('/api/admin/student-attendance-report', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/student-attendance-report",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id } = req.query;
-        console.log('📊 Getting student attendance report:', { startDate, endDate, kelas_id });
+      console.log("📊 Getting student attendance report:", {
+        startDate,
+        endDate,
+        kelas_id,
+      });
 
         if (!startDate || !endDate) {
-            return res.status(400).json({ error: 'Tanggal mulai dan tanggal selesai wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Tanggal mulai dan tanggal selesai wajib diisi" });
         }
 
         let query = `
@@ -1516,30 +1997,43 @@ app.get('/api/admin/student-attendance-report', authenticateToken, requireRole([
         
         const params = [startDate, endDate];
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        query += ' ORDER BY a.waktu_absen DESC, k.nama_kelas, s.nama';
+      query += " ORDER BY a.waktu_absen DESC, k.nama_kelas, s.nama";
         
         const [rows] = await connection.execute(query, params);
-        console.log(`✅ Student attendance report retrieved: ${rows.length} records`);
+      console.log(
+        `✅ Student attendance report retrieved: ${rows.length} records`
+      );
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting student attendance report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting student attendance report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Download student attendance report as CSV
-app.get('/api/admin/download-student-attendance', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/download-student-attendance",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id } = req.query;
-        console.log('📊 Downloading student attendance report:', { startDate, endDate, kelas_id });
+      console.log("📊 Downloading student attendance report:", {
+        startDate,
+        endDate,
+        kelas_id,
+      });
 
         if (!startDate || !endDate) {
-            return res.status(400).json({ error: 'Tanggal mulai dan tanggal selesai wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Tanggal mulai dan tanggal selesai wajib diisi" });
         }
 
         let query = `
@@ -1564,43 +2058,65 @@ app.get('/api/admin/download-student-attendance', authenticateToken, requireRole
         
         const params = [startDate, endDate];
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        query += ' ORDER BY a.waktu_absen DESC, k.nama_kelas, s.nama';
+      query += " ORDER BY a.waktu_absen DESC, k.nama_kelas, s.nama";
         
         const [rows] = await connection.execute(query, params);
 
         // Enhanced CSV format with UTF-8 BOM for Excel compatibility
-        let csvContent = '\uFEFF'; // UTF-8 BOM
-        csvContent += 'Tanggal,Kelas,Nama Siswa,NIS,Mata Pelajaran,Guru,Waktu Absen,Jam Mulai,Jam Selesai,Jadwal,Status,Keterangan\n';
-        
-        rows.forEach(row => {
-            csvContent += `"${row.tanggal}","${row.nama_kelas}","${row.nama_siswa}","${row.nis_siswa || ''}","${row.nama_mapel || ''}","${row.nama_guru || ''}","${row.waktu_absen || ''}","${row.jam_mulai || ''}","${row.jam_selesai || ''}","${row.jadwal || ''}","${row.status}","${row.keterangan || ''}"\n`;
-        });
+      let csvContent = "\uFEFF"; // UTF-8 BOM
+      csvContent +=
+        "Tanggal,Kelas,Nama Siswa,NIS,Mata Pelajaran,Guru,Waktu Absen,Jam Mulai,Jam Selesai,Jadwal,Status,Keterangan\n";
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="laporan-kehadiran-siswa-${startDate}-${endDate}.csv"`);
+      rows.forEach((row) => {
+        csvContent += `"${row.tanggal}","${row.nama_kelas}","${
+          row.nama_siswa
+        }","${row.nis_siswa || ""}","${row.nama_mapel || ""}","${
+          row.nama_guru || ""
+        }","${row.waktu_absen || ""}","${row.jam_mulai || ""}","${
+          row.jam_selesai || ""
+        }","${row.jadwal || ""}","${row.status}","${row.keterangan || ""}"\n`;
+      });
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="laporan-kehadiran-siswa-${startDate}-${endDate}.csv"`
+      );
         res.send(csvContent);
         
-        console.log(`✅ Student attendance report downloaded successfully: ${rows.length} records`);
+      console.log(
+        `✅ Student attendance report downloaded successfully: ${rows.length} records`
+      );
     } catch (error) {
-        console.error('❌ Error downloading student attendance report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error downloading student attendance report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // BANDING ABSEN ENDPOINTS  
 // ================================================
 
 // Get banding absen history report
-app.get('/api/admin/banding-absen-report', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/banding-absen-report",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id, status } = req.query;
-        console.log('📊 Getting banding absen report:', { startDate, endDate, kelas_id, status });
+      console.log("📊 Getting banding absen report:", {
+        startDate,
+        endDate,
+        kelas_id,
+        status,
+      });
 
         let query = `
             SELECT 
@@ -1636,36 +2152,46 @@ app.get('/api/admin/banding-absen-report', authenticateToken, requireRole(['admi
         const params = [];
         
         if (startDate && endDate) {
-            query += ' AND DATE(pba.tanggal_pengajuan) BETWEEN ? AND ?';
+        query += " AND DATE(pba.tanggal_pengajuan) BETWEEN ? AND ?";
             params.push(startDate, endDate);
         }
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        if (status && status !== '') {
-            query += ' AND pba.status_banding = ?';
+      if (status && status !== "") {
+        query += " AND pba.status_banding = ?";
             params.push(status);
         }
         
-        query += ' GROUP BY pba.id_banding ORDER BY pba.tanggal_pengajuan DESC';
+      query += " GROUP BY pba.id_banding ORDER BY pba.tanggal_pengajuan DESC";
         
         const [rows] = await connection.execute(query, params);
         console.log(`✅ Banding absen report retrieved: ${rows.length} records`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting banding absen report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting banding absen report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Download banding absen report as CSV
-app.get('/api/admin/download-banding-absen', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/download-banding-absen",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id, status } = req.query;
-        console.log('📊 Downloading banding absen report:', { startDate, endDate, kelas_id, status });
+      console.log("📊 Downloading banding absen report:", {
+        startDate,
+        endDate,
+        kelas_id,
+        status,
+      });
 
         let query = `
             SELECT 
@@ -1699,52 +2225,65 @@ app.get('/api/admin/download-banding-absen', authenticateToken, requireRole(['ad
         const params = [];
         
         if (startDate && endDate) {
-            query += ' AND DATE(pba.tanggal_pengajuan) BETWEEN ? AND ?';
+        query += " AND DATE(pba.tanggal_pengajuan) BETWEEN ? AND ?";
             params.push(startDate, endDate);
         }
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        if (status && status !== '') {
-            query += ' AND pba.status_banding = ?';
+      if (status && status !== "") {
+        query += " AND pba.status_banding = ?";
             params.push(status);
         }
         
-        query += ' GROUP BY pba.id_banding ORDER BY pba.tanggal_pengajuan DESC';
+      query += " GROUP BY pba.id_banding ORDER BY pba.tanggal_pengajuan DESC";
         
         const [rows] = await connection.execute(query, params);
 
         // Enhanced CSV format with UTF-8 BOM for Excel compatibility
-        let csvContent = '\uFEFF'; // UTF-8 BOM
-        csvContent += 'Tanggal Pengajuan,Tanggal Absen,Pengaju,Kelas,Mata Pelajaran,Guru,Jadwal,Status Asli,Status Diajukan,Alasan Banding,Status Banding,Catatan Guru,Tanggal Keputusan,Diproses Oleh,Jenis Banding,Jumlah Siswa\n';
+      let csvContent = "\uFEFF"; // UTF-8 BOM
+      csvContent +=
+        "Tanggal Pengajuan,Tanggal Absen,Pengaju,Kelas,Mata Pelajaran,Guru,Jadwal,Status Asli,Status Diajukan,Alasan Banding,Status Banding,Catatan Guru,Tanggal Keputusan,Diproses Oleh,Jenis Banding,Jumlah Siswa\n";
         
-        rows.forEach(row => {
+      rows.forEach((row) => {
             csvContent += `"${row.tanggal_pengajuan}","${row.tanggal_absen}","${row.nama_pengaju}","${row.nama_kelas}","${row.nama_mapel}","${row.nama_guru}","${row.jadwal}","${row.status_asli}","${row.status_diajukan}","${row.alasan_banding}","${row.status_banding}","${row.catatan_guru}","${row.tanggal_keputusan}","${row.diproses_oleh}","${row.jenis_banding}","${row.jumlah_siswa_banding}"\n`;
         });
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="riwayat-banding-absen-${startDate || 'all'}-${endDate || 'all'}.csv"`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="riwayat-banding-absen-${startDate || "all"}-${
+          endDate || "all"
+        }.csv"`
+      );
         res.send(csvContent);
         
-        console.log(`✅ Banding absen report downloaded successfully: ${rows.length} records`);
+      console.log(
+        `✅ Banding absen report downloaded successfully: ${rows.length} records`
+      );
     } catch (error) {
-        console.error('❌ Error downloading banding absen report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error downloading banding absen report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // PENGAJUAN IZIN SISWA ENDPOINTS
 // ================================================
 
 // Get pengajuan izin by siswa ID (updated for class data)
-app.get('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa/:siswaId/pengajuan-izin",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
-        console.log('📋 Getting pengajuan izin kelas for siswa:', siswaId);
+      console.log("📋 Getting pengajuan izin kelas for siswa:", siswaId);
 
         const query = `
             SELECT 
@@ -1775,7 +2314,7 @@ app.get('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['s
         // Get detail for each pengajuan (for class-based submissions)
         const pengajuanWithDetails = await Promise.all(
             pengajuanRows.map(async (pengajuan) => {
-                if (pengajuan.jenis_izin === 'kelas') {
+          if (pengajuan.jenis_izin === "kelas") {
                     // Get detailed siswa data for this pengajuan
                     const [detailRows] = await connection.execute(
                         `SELECT nama_siswa as nama, jenis_izin, alasan, bukti_pendukung 
@@ -1787,7 +2326,7 @@ app.get('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['s
                     return {
                         ...pengajuan,
                         siswa_izin: detailRows,
-                        total_siswa_izin: detailRows.length
+              total_siswa_izin: detailRows.length,
                     };
                 } else {
                     // Individual pengajuan (legacy support)
@@ -1796,29 +2335,47 @@ app.get('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['s
             })
         );
 
-        console.log(`✅ Pengajuan izin kelas retrieved: ${pengajuanWithDetails.length} items`);
+      console.log(
+        `✅ Pengajuan izin kelas retrieved: ${pengajuanWithDetails.length} items`
+      );
         res.json(pengajuanWithDetails);
     } catch (error) {
-        console.error('❌ Error getting pengajuan izin kelas:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting pengajuan izin kelas:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Submit new pengajuan izin
-app.post('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/siswa/:siswaId/pengajuan-izin",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
-        const { jadwal_id, tanggal_mulai, tanggal_selesai, jenis_izin, alasan } = req.body;
-        console.log('📝 Submitting pengajuan izin:', { siswaId, jadwal_id, tanggal_mulai, tanggal_selesai, jenis_izin });
+      const { jadwal_id, tanggal_mulai, tanggal_selesai, jenis_izin, alasan } =
+        req.body;
+      console.log("📝 Submitting pengajuan izin:", {
+        siswaId,
+        jadwal_id,
+        tanggal_mulai,
+        tanggal_selesai,
+        jenis_izin,
+      });
 
         // Validation
         if (!tanggal_mulai || !tanggal_selesai || !jenis_izin || !alasan) {
-            return res.status(400).json({ error: 'Semua field wajib diisi' });
+        return res.status(400).json({ error: "Semua field wajib diisi" });
         }
 
         // Validate date range
         if (new Date(tanggal_mulai) > new Date(tanggal_selesai)) {
-            return res.status(400).json({ error: 'Tanggal mulai tidak boleh lebih besar dari tanggal selesai' });
+        return res
+          .status(400)
+          .json({
+            error: "Tanggal mulai tidak boleh lebih besar dari tanggal selesai",
+          });
         }
 
         // Check if pengajuan already exists for overlapping dates
@@ -1829,36 +2386,61 @@ app.post('/api/siswa/:siswaId/pengajuan-izin', authenticateToken, requireRole(['
                  (tanggal_mulai <= ? AND tanggal_selesai >= ?) OR
                  (tanggal_mulai >= ? AND tanggal_selesai <= ?)
              )`,
-            [siswaId, tanggal_mulai, tanggal_mulai, tanggal_selesai, tanggal_selesai, tanggal_mulai, tanggal_selesai]
+        [
+          siswaId,
+          tanggal_mulai,
+          tanggal_mulai,
+          tanggal_selesai,
+          tanggal_selesai,
+          tanggal_mulai,
+          tanggal_selesai,
+        ]
         );
 
         if (existing.length > 0) {
-            return res.status(400).json({ error: 'Pengajuan izin untuk periode ini sudah ada atau bertumpang tindih' });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Pengajuan izin untuk periode ini sudah ada atau bertumpang tindih",
+          });
         }
 
         // Insert pengajuan izin
         const [result] = await connection.execute(
             `INSERT INTO pengajuan_izin_siswa (siswa_id, jadwal_id, tanggal_mulai, tanggal_selesai, jenis_izin, alasan)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [siswaId, jadwal_id || null, tanggal_mulai, tanggal_selesai, jenis_izin, alasan]
-        );
+        [
+          siswaId,
+          jadwal_id || null,
+          tanggal_mulai,
+          tanggal_selesai,
+          jenis_izin,
+          alasan,
+        ]
+      );
 
-        console.log('✅ Pengajuan izin submitted successfully');
+      console.log("✅ Pengajuan izin submitted successfully");
         res.json({ 
-            message: 'Pengajuan izin berhasil dikirim',
-            id: result.insertId 
+        message: "Pengajuan izin berhasil dikirim",
+        id: result.insertId,
         });
     } catch (error) {
-        console.error('❌ Error submitting pengajuan izin:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error submitting pengajuan izin:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get pengajuan izin for guru to approve/reject
-app.get('/api/guru/:guruId/pengajuan-izin', authenticateToken, requireRole(['guru']), async (req, res) => {
+app.get(
+  "/api/guru/:guruId/pengajuan-izin",
+  authenticateToken,
+  requireRole(["guru"]),
+  async (req, res) => {
     try {
         const { guruId } = req.params;
-        console.log('📋 Getting pengajuan izin for guru:', guruId);
+      console.log("📋 Getting pengajuan izin for guru:", guruId);
 
         const query = `
             SELECT 
@@ -1894,23 +2476,34 @@ app.get('/api/guru/:guruId/pengajuan-izin', authenticateToken, requireRole(['gur
         console.log(`✅ Pengajuan izin for guru retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting pengajuan izin for guru:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting pengajuan izin for guru:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Approve or reject pengajuan izin by guru
-app.put('/api/guru/pengajuan-izin/:pengajuanId', authenticateToken, requireRole(['guru']), async (req, res) => {
+app.put(
+  "/api/guru/pengajuan-izin/:pengajuanId",
+  authenticateToken,
+  requireRole(["guru"]),
+  async (req, res) => {
     try {
         const { pengajuanId } = req.params;
         const { status, keterangan_guru } = req.body;
         const guruId = req.user.guru_id;
         
-        console.log('📝 Guru responding to pengajuan izin:', { pengajuanId, status, guruId });
+      console.log("📝 Guru responding to pengajuan izin:", {
+        pengajuanId,
+        status,
+        guruId,
+      });
 
         // Validation
-        if (!status || !['disetujui', 'ditolak'].includes(status)) {
-            return res.status(400).json({ error: 'Status harus disetujui atau ditolak' });
+      if (!status || !["disetujui", "ditolak"].includes(status)) {
+        return res
+          .status(400)
+          .json({ error: "Status harus disetujui atau ditolak" });
         }
 
         // Update pengajuan izin
@@ -1918,35 +2511,53 @@ app.put('/api/guru/pengajuan-izin/:pengajuanId', authenticateToken, requireRole(
             `UPDATE pengajuan_izin_siswa 
              SET status = ?, keterangan_guru = ?, tanggal_respon = NOW(), guru_id = ?
              WHERE id_pengajuan = ?`,
-            [status, keterangan_guru || '', guruId, pengajuanId]
+        [status, keterangan_guru || "", guruId, pengajuanId]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Pengajuan izin tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Pengajuan izin tidak ditemukan" });
         }
 
-        console.log('✅ Pengajuan izin response submitted successfully');
+      console.log("✅ Pengajuan izin response submitted successfully");
         res.json({ 
-            message: `Pengajuan izin berhasil ${status === 'disetujui' ? 'disetujui' : 'ditolak'}`
+        message: `Pengajuan izin berhasil ${
+          status === "disetujui" ? "disetujui" : "ditolak"
+        }`,
         });
     } catch (error) {
-        console.error('❌ Error responding to pengajuan izin:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error responding to pengajuan izin:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Approve or reject pengajuan izin by ID (alternative endpoint for frontend compatibility)
-app.put('/api/pengajuan-izin/:pengajuanId/approve', authenticateToken, requireRole(['guru']), async (req, res) => {
+app.put(
+  "/api/pengajuan-izin/:pengajuanId/approve",
+  authenticateToken,
+  requireRole(["guru"]),
+  async (req, res) => {
     try {
         const { pengajuanId } = req.params;
         const { status_persetujuan, catatan_guru, disetujui_oleh } = req.body;
         const guruId = disetujui_oleh || req.user.guru_id || req.user.id;
         
-        console.log('📝 Guru approving pengajuan izin:', { pengajuanId, status_persetujuan, guruId });
+      console.log("📝 Guru approving pengajuan izin:", {
+        pengajuanId,
+        status_persetujuan,
+        guruId,
+      });
 
         // Validation
-        if (!status_persetujuan || !['disetujui', 'ditolak'].includes(status_persetujuan)) {
-            return res.status(400).json({ error: 'Status harus disetujui atau ditolak' });
+      if (
+        !status_persetujuan ||
+        !["disetujui", "ditolak"].includes(status_persetujuan)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Status harus disetujui atau ditolak" });
         }
 
         // Update pengajuan izin
@@ -1954,32 +2565,41 @@ app.put('/api/pengajuan-izin/:pengajuanId/approve', authenticateToken, requireRo
             `UPDATE pengajuan_izin_siswa 
              SET status = ?, keterangan_guru = ?, tanggal_respon = NOW(), guru_id = ?
              WHERE id_pengajuan = ?`,
-            [status_persetujuan, catatan_guru || '', guruId, pengajuanId]
+        [status_persetujuan, catatan_guru || "", guruId, pengajuanId]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Pengajuan izin tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Pengajuan izin tidak ditemukan" });
         }
 
-        console.log('✅ Pengajuan izin approval response submitted successfully');
+      console.log("✅ Pengajuan izin approval response submitted successfully");
         res.json({ 
-            message: `Pengajuan izin berhasil ${status_persetujuan === 'disetujui' ? 'disetujui' : 'ditolak'}`,
-            id: pengajuanId
+        message: `Pengajuan izin berhasil ${
+          status_persetujuan === "disetujui" ? "disetujui" : "ditolak"
+        }`,
+        id: pengajuanId,
         });
     } catch (error) {
-        console.error('❌ Error responding to pengajuan izin approval:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error responding to pengajuan izin approval:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // COMPATIBILITY ENDPOINTS FOR SCHEDULE MANAGEMENT
 // ================================================
 
 // Get subjects (alias for /api/admin/mapel)
-app.get('/api/admin/subjects', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/subjects",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📚 Getting subjects for schedule management');
+      console.log("📚 Getting subjects for schedule management");
         
         const query = `
             SELECT 
@@ -1996,15 +2616,20 @@ app.get('/api/admin/subjects', authenticateToken, requireRole(['admin']), async 
         console.log(`✅ Subjects retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting subjects:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting subjects:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get classes (alias for /api/admin/kelas)
-app.get('/api/admin/classes', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/classes",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('🏫 Getting classes for schedule management');
+      console.log("🏫 Getting classes for schedule management");
         
         const query = `
             SELECT id_kelas as id, nama_kelas, tingkat, status
@@ -2016,22 +2641,23 @@ app.get('/api/admin/classes', authenticateToken, requireRole(['admin']), async (
         console.log(`✅ Classes retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting classes:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting classes:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // ABSENSI ENDPOINTS - Real Time Data
 // ================================================
 
 // Get today's schedule for guru or siswa
-app.get('/api/jadwal/today', authenticateToken, async (req, res) => {
+app.get("/api/jadwal/today", authenticateToken, async (req, res) => {
     try {
-        let query = '';
+    let query = "";
         let params = [];
 
-        if (req.user.role === 'guru') {
+    if (req.user.role === "guru") {
             query = `
                 SELECT j.*, k.nama_kelas, m.nama_mapel
                 FROM jadwal j
@@ -2041,7 +2667,7 @@ app.get('/api/jadwal/today', authenticateToken, async (req, res) => {
                 ORDER BY j.jam_ke
             `;
             params = [req.user.guru_id];
-        } else if (req.user.role === 'siswa') {
+    } else if (req.user.role === "siswa") {
             query = `
                 SELECT j.*, g.nama as nama_guru, m.nama_mapel
                 FROM jadwal j
@@ -2055,17 +2681,22 @@ app.get('/api/jadwal/today', authenticateToken, async (req, res) => {
 
         const [rows] = await connection.execute(query, params);
         
-        console.log(`📅 Today's schedule retrieved for ${req.user.role}: ${req.user.username}`);
+    console.log(
+      `📅 Today's schedule retrieved for ${req.user.role}: ${req.user.username}`
+    );
         res.json({ success: true, data: rows });
-
     } catch (error) {
-        console.error('❌ Get today schedule error:', error);
-        res.status(500).json({ error: 'Failed to retrieve today schedule' });
+    console.error("❌ Get today schedule error:", error);
+    res.status(500).json({ error: "Failed to retrieve today schedule" });
     }
 });
 
 // Record attendance (siswa marking guru attendance)
-app.post('/api/absensi', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/absensi",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { jadwal_id, guru_id, status, keterangan } = req.body;
 
@@ -2077,37 +2708,49 @@ app.post('/api/absensi', authenticateToken, requireRole(['siswa']), async (req, 
         );
 
         if (existing.length > 0) {
-            return res.status(400).json({ error: 'Absensi untuk jadwal ini sudah dicatat hari ini' });
+        return res
+          .status(400)
+          .json({ error: "Absensi untuk jadwal ini sudah dicatat hari ini" });
         }
 
         // Get jadwal details
         const [jadwalData] = await connection.execute(
-            'SELECT * FROM jadwal WHERE id_jadwal = ?',
+        "SELECT * FROM jadwal WHERE id_jadwal = ?",
             [jadwal_id]
         );
 
         if (jadwalData.length === 0) {
-            return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+        return res.status(404).json({ error: "Jadwal tidak ditemukan" });
         }
 
         // Record attendance
         await connection.execute(
             `INSERT INTO absensi_guru (jadwal_id, guru_id, kelas_id, siswa_pencatat_id, tanggal, jam_ke, status, keterangan)
              VALUES (?, ?, ?, ?, CURDATE(), ?, ?, ?)`,
-            [jadwal_id, guru_id, req.user.kelas_id, req.user.siswa_id, jadwalData[0].jam_ke, status, keterangan]
-        );
+        [
+          jadwal_id,
+          guru_id,
+          req.user.kelas_id,
+          req.user.siswa_id,
+          jadwalData[0].jam_ke,
+          status,
+          keterangan,
+        ]
+      );
 
-        console.log(`✅ Attendance recorded by ${req.user.nama} for guru_id: ${guru_id}, status: ${status}`);
-        res.json({ success: true, message: 'Absensi berhasil dicatat' });
-
+      console.log(
+        `✅ Attendance recorded by ${req.user.nama} for guru_id: ${guru_id}, status: ${status}`
+      );
+      res.json({ success: true, message: "Absensi berhasil dicatat" });
     } catch (error) {
-        console.error('❌ Record attendance error:', error);
-        res.status(500).json({ error: 'Failed to record attendance' });
+      console.error("❌ Record attendance error:", error);
+      res.status(500).json({ error: "Failed to record attendance" });
     }
-});
+  }
+);
 
 // Get attendance history
-app.get('/api/absensi/history', authenticateToken, async (req, res) => {
+app.get("/api/absensi/history", authenticateToken, async (req, res) => {
     try {
         const { date_start, date_end, limit = 50 } = req.query;
         
@@ -2127,39 +2770,40 @@ app.get('/api/absensi/history', authenticateToken, async (req, res) => {
         let whereConditions = [];
 
         // Filter by user role
-        if (req.user.role === 'guru') {
-            whereConditions.push('ag.guru_id = ?');
+    if (req.user.role === "guru") {
+      whereConditions.push("ag.guru_id = ?");
             params.push(req.user.guru_id);
-        } else if (req.user.role === 'siswa') {
-            whereConditions.push('ag.kelas_id = ?');
+    } else if (req.user.role === "siswa") {
+      whereConditions.push("ag.kelas_id = ?");
             params.push(req.user.kelas_id);
         }
 
         // Date filters
         if (date_start) {
-            whereConditions.push('ag.tanggal >= ?');
+      whereConditions.push("ag.tanggal >= ?");
             params.push(date_start);
         }
         if (date_end) {
-            whereConditions.push('ag.tanggal <= ?');
+      whereConditions.push("ag.tanggal <= ?");
             params.push(date_end);
         }
 
         if (whereConditions.length > 0) {
-            query += ' WHERE ' + whereConditions.join(' AND ');
+      query += " WHERE " + whereConditions.join(" AND ");
         }
 
-        query += ' ORDER BY ag.tanggal DESC, j.jam_ke ASC LIMIT ?';
+    query += " ORDER BY ag.tanggal DESC, j.jam_ke ASC LIMIT ?";
         params.push(parseInt(limit));
 
         const [rows] = await connection.execute(query, params);
         
-        console.log(`📊 Attendance history retrieved for ${req.user.role}: ${req.user.username}`);
+    console.log(
+      `📊 Attendance history retrieved for ${req.user.role}: ${req.user.username}`
+    );
         res.json({ success: true, data: rows });
-
     } catch (error) {
-        console.error('❌ Get attendance history error:', error);
-        res.status(500).json({ error: 'Failed to retrieve attendance history' });
+    console.error("❌ Get attendance history error:", error);
+    res.status(500).json({ error: "Failed to retrieve attendance history" });
     }
 });
 
@@ -2168,7 +2812,11 @@ app.get('/api/absensi/history', authenticateToken, async (req, res) => {
 // ================================================
 
 // Export attendance to Excel
-app.get('/api/export/absensi', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/export/absensi",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { date_start, date_end } = req.query;
         
@@ -2190,43 +2838,43 @@ app.get('/api/export/absensi', authenticateToken, requireRole(['admin']), async 
         let whereConditions = [];
 
         if (date_start) {
-            whereConditions.push('ag.tanggal >= ?');
+        whereConditions.push("ag.tanggal >= ?");
             params.push(date_start);
         }
         if (date_end) {
-            whereConditions.push('ag.tanggal <= ?');
+        whereConditions.push("ag.tanggal <= ?");
             params.push(date_end);
         }
 
         if (whereConditions.length > 0) {
-            query += ' WHERE ' + whereConditions.join(' AND ');
+        query += " WHERE " + whereConditions.join(" AND ");
         }
 
-        query += ' ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke';
+      query += " ORDER BY ag.tanggal DESC, k.nama_kelas, j.jam_ke";
 
         const [rows] = await connection.execute(query, params);
 
         // Create Excel workbook
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Data Absensi');
+      const worksheet = workbook.addWorksheet("Data Absensi");
 
         // Add headers
         worksheet.columns = [
-            { header: 'Tanggal', key: 'tanggal', width: 12 },
-            { header: 'Hari', key: 'hari', width: 10 },
-            { header: 'Jam Ke', key: 'jam_ke', width: 8 },
-            { header: 'Waktu', key: 'waktu', width: 15 },
-            { header: 'Kelas', key: 'nama_kelas', width: 15 },
-            { header: 'Mata Pelajaran', key: 'nama_mapel', width: 20 },
-            { header: 'Nama Guru', key: 'nama_guru', width: 25 },
-            { header: 'NIP', key: 'nip', width: 20 },
-            { header: 'Status', key: 'status', width: 12 },
-            { header: 'Keterangan', key: 'keterangan', width: 30 },
-            { header: 'Pencatat', key: 'nama_pencatat', width: 20 }
+        { header: "Tanggal", key: "tanggal", width: 12 },
+        { header: "Hari", key: "hari", width: 10 },
+        { header: "Jam Ke", key: "jam_ke", width: 8 },
+        { header: "Waktu", key: "waktu", width: 15 },
+        { header: "Kelas", key: "nama_kelas", width: 15 },
+        { header: "Mata Pelajaran", key: "nama_mapel", width: 20 },
+        { header: "Nama Guru", key: "nama_guru", width: 25 },
+        { header: "NIP", key: "nip", width: 20 },
+        { header: "Status", key: "status", width: 12 },
+        { header: "Keterangan", key: "keterangan", width: 30 },
+        { header: "Pencatat", key: "nama_pencatat", width: 20 },
         ];
 
         // Add data
-        rows.forEach(row => {
+      rows.forEach((row) => {
             worksheet.addRow({
                 tanggal: row.tanggal,
                 hari: row.hari,
@@ -2237,50 +2885,67 @@ app.get('/api/export/absensi', authenticateToken, requireRole(['admin']), async 
                 nama_guru: row.nama_guru,
                 nip: row.nip,
                 status: row.status,
-                keterangan: row.keterangan || '-',
-                nama_pencatat: row.nama_pencatat
+          keterangan: row.keterangan || "-",
+          nama_pencatat: row.nama_pencatat,
             });
         });
 
         // Style headers
         worksheet.getRow(1).font = { bold: true };
         worksheet.getRow(1).fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: '2563eb' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "2563eb" },
         };
 
         // Set response headers
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=absensi-guru-${new Date().toISOString().split('T')[0]}.xlsx`);
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=absensi-guru-${
+          new Date().toISOString().split("T")[0]
+        }.xlsx`
+      );
 
         // Write to response
         await workbook.xlsx.write(res);
         res.end();
 
-        console.log('✅ Excel export completed');
-
+      console.log("✅ Excel export completed");
     } catch (error) {
-        console.error('❌ Excel export error:', error);
-        res.status(500).json({ error: 'Failed to export data to Excel' });
+      console.error("❌ Excel export error:", error);
+      res.status(500).json({ error: "Failed to export data to Excel" });
     }
-});
+  }
+);
 
 // ================================================
 // GURU ENDPOINTS
 // ================================================
 
 // Get teacher schedule (uses modern schema: jadwal/mapel/kelas) & guru_id from token
-app.get('/api/guru/jadwal', authenticateToken, requireRole(['guru', 'admin']), async (req, res) => {
+app.get(
+  "/api/guru/jadwal",
+  authenticateToken,
+  requireRole(["guru", "admin"]),
+  async (req, res) => {
     const guruId = req.user.guru_id; // correct mapping to guru.id_guru
-    console.log(`📅 Getting schedule for authenticated guru_id: ${guruId} (user_id: ${req.user.id})`);
+    console.log(
+      `📅 Getting schedule for authenticated guru_id: ${guruId} (user_id: ${req.user.id})`
+    );
 
     if (!guruId) {
-        return res.status(400).json({ error: 'guru_id tidak ditemukan pada token pengguna' });
+      return res
+        .status(400)
+        .json({ error: "guru_id tidak ditemukan pada token pengguna" });
     }
 
     try {
-        const [jadwal] = await connection.execute(`
+      const [jadwal] = await connection.execute(
+        `
             SELECT 
                 j.id_jadwal AS id,
                 j.hari,
@@ -2304,27 +2969,41 @@ app.get('/api/guru/jadwal', authenticateToken, requireRole(['guru', 'admin']), a
                 WHEN 'Sabtu' THEN 6
                 WHEN 'Minggu' THEN 7
             END, j.jam_mulai
-        `, [guruId]);
+        `,
+        [guruId]
+      );
 
-        console.log(`✅ Found ${jadwal.length} schedule entries for guru_id: ${guruId}`);
+      console.log(
+        `✅ Found ${jadwal.length} schedule entries for guru_id: ${guruId}`
+      );
         res.json({ success: true, data: jadwal });
     } catch (error) {
-        console.error('❌ Error fetching teacher schedule:', error);
-        res.status(500).json({ error: 'Gagal memuat jadwal guru.' });
+      console.error("❌ Error fetching teacher schedule:", error);
+      res.status(500).json({ error: "Gagal memuat jadwal guru." });
     }
-});
+  }
+);
 
 // Get teacher attendance history
-app.get('/api/guru/history', authenticateToken, requireRole(['guru', 'admin']), async (req, res) => {
+app.get(
+  "/api/guru/history",
+  authenticateToken,
+  requireRole(["guru", "admin"]),
+  async (req, res) => {
     const guruId = req.user.guru_id;
-    console.log(`📊 Fetching teacher attendance history for guru_id: ${guruId} (user_id: ${req.user.id})`);
+    console.log(
+      `📊 Fetching teacher attendance history for guru_id: ${guruId} (user_id: ${req.user.id})`
+    );
 
     if (!guruId) {
-        return res.status(400).json({ error: 'guru_id tidak ditemukan pada token pengguna' });
+      return res
+        .status(400)
+        .json({ error: "guru_id tidak ditemukan pada token pengguna" });
     }
 
     try {
-        const [history] = await connection.execute(`
+      const [history] = await connection.execute(
+        `
             SELECT 
                 ag.tanggal, 
                 ag.status, 
@@ -2338,25 +3017,33 @@ app.get('/api/guru/history', authenticateToken, requireRole(['guru', 'admin']), 
             WHERE j.guru_id = ?
             ORDER BY ag.tanggal DESC, j.jam_mulai ASC
             LIMIT 50
-        `, [guruId]);
+        `,
+        [guruId]
+      );
 
-        console.log(`✅ Found ${history.length} attendance history records for guru_id ${guruId}`);
+      console.log(
+        `✅ Found ${history.length} attendance history records for guru_id ${guruId}`
+      );
         res.json({ success: true, data: history });
     } catch (error) {
-        console.error('❌ Error fetching teacher attendance history:', error);
-        res.status(500).json({ error: 'Gagal memuat riwayat absensi.' });
+      console.error("❌ Error fetching teacher attendance history:", error);
+      res.status(500).json({ error: "Gagal memuat riwayat absensi." });
     }
-});
-
+  }
+);
 
 // ================================================
 // SISWA PERWAKILAN ENDPOINTS
 // ================================================
 
 // Get siswa perwakilan info
-app.get('/api/siswa-perwakilan/info', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa-perwakilan/info",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting siswa perwakilan info for user:', req.user.id);
+      console.log("📋 Getting siswa perwakilan info for user:", req.user.id);
 
         const [siswaData] = await connection.execute(
             `SELECT sp.id_siswa, sp.nis, sp.nama, sp.kelas_id, k.nama_kelas 
@@ -2367,11 +3054,13 @@ app.get('/api/siswa-perwakilan/info', authenticateToken, requireRole(['siswa']),
         );
 
         if (siswaData.length === 0) {
-            return res.status(404).json({ error: 'Data siswa perwakilan tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Data siswa perwakilan tidak ditemukan" });
         }
 
         const info = siswaData[0];
-        console.log('✅ Siswa perwakilan info retrieved:', info);
+      console.log("✅ Siswa perwakilan info retrieved:", info);
 
         res.json({
             success: true,
@@ -2379,42 +3068,57 @@ app.get('/api/siswa-perwakilan/info', authenticateToken, requireRole(['siswa']),
             nis: info.nis,
             nama: info.nama,
             kelas_id: info.kelas_id,
-            nama_kelas: info.nama_kelas
+        nama_kelas: info.nama_kelas,
         });
-
     } catch (error) {
-        console.error('❌ Error getting siswa perwakilan info:', error);
-        res.status(500).json({ error: 'Gagal memuat informasi siswa perwakilan' });
+      console.error("❌ Error getting siswa perwakilan info:", error);
+      res
+        .status(500)
+        .json({ error: "Gagal memuat informasi siswa perwakilan" });
     }
-});
+  }
+);
 
 // Get jadwal hari ini untuk siswa
-app.get('/api/siswa/:siswa_id/jadwal-hari-ini', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa/:siswa_id/jadwal-hari-ini",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswa_id } = req.params;
-        console.log('📅 Getting jadwal hari ini for siswa:', siswa_id);
+      console.log("📅 Getting jadwal hari ini for siswa:", siswa_id);
 
         // Get current day in Indonesian
         const today = new Date();
-        const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const dayNames = [
+        "Minggu",
+        "Senin",
+        "Selasa",
+        "Rabu",
+        "Kamis",
+        "Jumat",
+        "Sabtu",
+      ];
         const currentDay = dayNames[today.getDay()];
 
-        console.log('📅 Current day:', currentDay);
+      console.log("📅 Current day:", currentDay);
 
         // Get siswa's class
         const [siswaData] = await connection.execute(
-            'SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?',
+        "SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?",
             [siswa_id]
         );
 
         if (siswaData.length === 0) {
-            return res.status(404).json({ error: 'Siswa tidak ditemukan' });
+        return res.status(404).json({ error: "Siswa tidak ditemukan" });
         }
 
         const kelasId = siswaData[0].kelas_id;
 
         // Get today's schedule for the class
-        const [jadwalData] = await connection.execute(`
+      const [jadwalData] = await connection.execute(
+        `
             SELECT 
                 j.id_jadwal,
                 j.jam_ke,
@@ -2434,30 +3138,36 @@ app.get('/api/siswa/:siswa_id/jadwal-hari-ini', authenticateToken, requireRole([
                 AND ag.tanggal = CURDATE()
             WHERE j.kelas_id = ? AND j.hari = ?
             ORDER BY j.jam_ke
-        `, [kelasId, currentDay]);
+        `,
+        [kelasId, currentDay]
+      );
 
-        console.log('✅ Jadwal retrieved:', jadwalData.length, 'items');
+      console.log("✅ Jadwal retrieved:", jadwalData.length, "items");
 
         res.json(jadwalData);
-
     } catch (error) {
-        console.error('❌ Error getting jadwal hari ini:', error);
-        res.status(500).json({ error: 'Gagal memuat jadwal hari ini' });
+      console.error("❌ Error getting jadwal hari ini:", error);
+      res.status(500).json({ error: "Gagal memuat jadwal hari ini" });
     }
-});
+  }
+);
 
 // Submit kehadiran guru
-app.post('/api/siswa/submit-kehadiran-guru', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/siswa/submit-kehadiran-guru",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswa_id, kehadiran_data } = req.body;
-        console.log('📝 Submitting kehadiran guru for siswa:', siswa_id);
-        console.log('📝 Kehadiran data:', kehadiran_data);
+      console.log("📝 Submitting kehadiran guru for siswa:", siswa_id);
+      console.log("📝 Kehadiran data:", kehadiran_data);
 
         // Begin transaction
-        await connection.execute('START TRANSACTION');
+      await connection.execute("START TRANSACTION");
 
-        const today = new Date().toISOString().split('T')[0];
-        const currentTime = new Date().toTimeString().split(' ')[0];
+      const today = new Date().toISOString().split("T")[0];
+      const currentTime = new Date().toTimeString().split(" ")[0];
 
         // Insert/update attendance for each jadwal
         for (const [jadwalId, data] of Object.entries(kehadiran_data)) {
@@ -2465,72 +3175,83 @@ app.post('/api/siswa/submit-kehadiran-guru', authenticateToken, requireRole(['si
 
             // Check if attendance record already exists
             const [existingRecord] = await connection.execute(
-                'SELECT id_absensi FROM absensi_guru WHERE jadwal_id = ? AND tanggal = ?',
+          "SELECT id_absensi FROM absensi_guru WHERE jadwal_id = ? AND tanggal = ?",
                 [jadwalId, today]
             );
 
             if (existingRecord.length > 0) {
                 // Update existing record
-                await connection.execute(`
+          await connection.execute(
+            `
                     UPDATE absensi_guru 
                     SET status = ?, keterangan = ?, waktu_pencatatan = ?, siswa_pencatat_id = ?
                     WHERE jadwal_id = ? AND tanggal = ?
-                `, [status, keterangan || null, currentTime, siswa_id, jadwalId, today]);
+                `,
+            [status, keterangan || null, currentTime, siswa_id, jadwalId, today]
+          );
             } else {
                 // Insert new record
-                await connection.execute(`
+          await connection.execute(
+            `
                     INSERT INTO absensi_guru 
                     (jadwal_id, tanggal, status, keterangan, waktu_pencatatan, siswa_pencatat_id) 
                     VALUES (?, ?, ?, ?, ?, ?)
-                `, [jadwalId, today, status, keterangan || null, currentTime, siswa_id]);
+                `,
+            [jadwalId, today, status, keterangan || null, currentTime, siswa_id]
+          );
             }
         }
 
         // Commit transaction
-        await connection.execute('COMMIT');
+      await connection.execute("COMMIT");
 
-        console.log('✅ Kehadiran guru submitted successfully');
+      console.log("✅ Kehadiran guru submitted successfully");
 
         res.json({
             success: true,
-            message: 'Data kehadiran guru berhasil disimpan'
+        message: "Data kehadiran guru berhasil disimpan",
         });
-
     } catch (error) {
         // Rollback on error
-        await connection.execute('ROLLBACK');
-        console.error('❌ Error submitting kehadiran guru:', error);
-        res.status(500).json({ error: 'Gagal menyimpan data kehadiran guru' });
+      await connection.execute("ROLLBACK");
+      console.error("❌ Error submitting kehadiran guru:", error);
+      res.status(500).json({ error: "Gagal menyimpan data kehadiran guru" });
     }
-});
+  }
+);
 
 // Get riwayat kehadiran kelas (for siswa perwakilan)
-app.get('/api/siswa/:siswa_id/riwayat-kehadiran', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa/:siswa_id/riwayat-kehadiran",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswa_id } = req.params;
-        console.log('📊 Getting riwayat kehadiran kelas for siswa:', siswa_id);
+      console.log("📊 Getting riwayat kehadiran kelas for siswa:", siswa_id);
 
         // Get siswa's class
         const [siswaData] = await connection.execute(
-            'SELECT kelas_id, nama FROM siswa_perwakilan WHERE id_siswa = ?',
+        "SELECT kelas_id, nama FROM siswa_perwakilan WHERE id_siswa = ?",
             [siswa_id]
         );
 
         if (siswaData.length === 0) {
-            return res.status(404).json({ error: 'Siswa tidak ditemukan' });
+        return res.status(404).json({ error: "Siswa tidak ditemukan" });
         }
 
         const kelasId = siswaData[0].kelas_id;
 
         // Get total students in class
         const [totalSiswaResult] = await connection.execute(
-            'SELECT COUNT(*) as total FROM siswa_perwakilan WHERE kelas_id = ?',
+        "SELECT COUNT(*) as total FROM siswa_perwakilan WHERE kelas_id = ?",
             [kelasId]
         );
         const totalSiswa = totalSiswaResult[0].total;
 
         // Get attendance history for the last 30 days with aggregated data
-        const [riwayatData] = await connection.execute(`
+      const [riwayatData] = await connection.execute(
+        `
             SELECT 
                 ag.tanggal,
                 j.id_jadwal,
@@ -2559,46 +3280,48 @@ app.get('/api/siswa/:siswa_id/riwayat-kehadiran', authenticateToken, requireRole
             WHERE j.kelas_id = ? 
                 AND ag.tanggal >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
             ORDER BY ag.tanggal DESC, j.jam_ke ASC
-        `, [kelasId, kelasId]);
+        `,
+        [kelasId, kelasId]
+      );
 
         // Group by date and calculate statistics
         const groupedData = {};
-        riwayatData.forEach(row => {
+      riwayatData.forEach((row) => {
             const dateKey = row.tanggal;
             if (!groupedData[dateKey]) {
                 groupedData[dateKey] = {
                     tanggal: dateKey,
-                    jadwal: []
+            jadwal: [],
                 };
             }
 
             // Parse student attendance data
-            const siswaData = row.siswa_data ? row.siswa_data.split('|') : [];
+        const siswaData = row.siswa_data ? row.siswa_data.split("|") : [];
             const siswaStats = {
                 hadir: 0,
                 izin: 0,
                 sakit: 0,
                 alpa: 0,
-                tidak_hadir: []
-            };
+          tidak_hadir: [],
+        };
 
-            siswaData.forEach(data => {
-                const [nama, status] = data.split(':');
-                if (status === 'hadir') {
+        siswaData.forEach((data) => {
+          const [nama, status] = data.split(":");
+          if (status === "hadir") {
                     siswaStats.hadir++;
-                } else if (status === 'izin') {
+          } else if (status === "izin") {
                     siswaStats.izin++;
-                    siswaStats.tidak_hadir.push({ nama, status: 'izin' });
-                } else if (status === 'sakit') {
+            siswaStats.tidak_hadir.push({ nama, status: "izin" });
+          } else if (status === "sakit") {
                     siswaStats.sakit++;
-                    siswaStats.tidak_hadir.push({ nama, status: 'sakit' });
-                } else if (status === 'alpa') {
+            siswaStats.tidak_hadir.push({ nama, status: "sakit" });
+          } else if (status === "alpa") {
                     siswaStats.alpa++;
-                    siswaStats.tidak_hadir.push({ nama, status: 'alpa' });
+            siswaStats.tidak_hadir.push({ nama, status: "alpa" });
                 } else {
                     // tidak_hadir (no attendance record)
                     siswaStats.alpa++;
-                    siswaStats.tidak_hadir.push({ nama, status: 'alpa' });
+            siswaStats.tidak_hadir.push({ nama, status: "alpa" });
                 }
             });
 
@@ -2616,29 +3339,37 @@ app.get('/api/siswa/:siswa_id/riwayat-kehadiran', authenticateToken, requireRole
                 total_izin: siswaStats.izin,
                 total_sakit: siswaStats.sakit,
                 total_alpa: siswaStats.alpa,
-                siswa_tidak_hadir: siswaStats.tidak_hadir
+          siswa_tidak_hadir: siswaStats.tidak_hadir,
             });
         });
 
         const result = Object.values(groupedData);
-        console.log('✅ Riwayat kehadiran kelas retrieved:', result.length, 'days');
+      console.log(
+        "✅ Riwayat kehadiran kelas retrieved:",
+        result.length,
+        "days"
+      );
 
         res.json(result);
-
     } catch (error) {
-        console.error('❌ Error getting riwayat kehadiran:', error);
-        res.status(500).json({ error: 'Gagal memuat riwayat kehadiran' });
+      console.error("❌ Error getting riwayat kehadiran:", error);
+      res.status(500).json({ error: "Gagal memuat riwayat kehadiran" });
     }
-});
+  }
+);
 
 // ====================
 // ADMIN DASHBOARD ENDPOINTS
 // ====================
 
 // Get teachers for admin dashboard
-app.get('/api/admin/teachers', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/teachers",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting teachers for admin dashboard');
+      console.log("📋 Getting teachers for admin dashboard");
         
         const query = `
             SELECT 
@@ -2663,29 +3394,36 @@ app.get('/api/admin/teachers', authenticateToken, requireRole(['admin']), async 
         console.log(`✅ Teachers retrieved: ${results.length} items`);
         res.json(results);
     } catch (error) {
-        console.error('❌ Error getting teachers:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting teachers:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Add teacher account
-app.post('/api/admin/teachers', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/teachers",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { nama, username, password } = req.body;
-        console.log('➕ Adding teacher account:', { nama, username });
+      console.log("➕ Adding teacher account:", { nama, username });
 
         if (!nama || !username || !password) {
-            return res.status(400).json({ error: 'Nama, username, dan password wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Nama, username, dan password wajib diisi" });
         }
 
         // Check if username already exists
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ?',
+        "SELECT id FROM users WHERE username = ?",
             [username]
         );
 
         if (existingUsers.length > 0) {
-            return res.status(400).json({ error: 'Username sudah digunakan' });
+        return res.status(400).json({ error: "Username sudah digunakan" });
         }
 
         // Hash password
@@ -2697,49 +3435,54 @@ app.post('/api/admin/teachers', authenticateToken, requireRole(['admin']), async
         try {
             // Insert user account
             const [userResult] = await connection.execute(
-                'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-                [username, hashedPassword, 'guru']
+          "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+          [username, hashedPassword, "guru"]
             );
 
             // Insert guru data with generated NIP
             const nip = `G${Date.now().toString().slice(-8)}`; // Generate simple NIP
             await connection.execute(
-                'INSERT INTO guru (nip, nama, username, jenis_kelamin, status) VALUES (?, ?, ?, ?, ?)',
-                [nip, nama, username, 'L', 'aktif']
+          "INSERT INTO guru (nip, nama, username, jenis_kelamin, status) VALUES (?, ?, ?, ?, ?)",
+          [nip, nama, username, "L", "aktif"]
             );
 
             await connection.commit();
-            console.log('✅ Teacher account added successfully');
-            res.json({ message: 'Akun guru berhasil ditambahkan' });
+        console.log("✅ Teacher account added successfully");
+        res.json({ message: "Akun guru berhasil ditambahkan" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error adding teacher:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error adding teacher:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Update teacher account
-app.put('/api/admin/teachers/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/teachers/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         const { nama, username, password } = req.body;
-        console.log('📝 Updating teacher account:', { id, nama, username });
+      console.log("📝 Updating teacher account:", { id, nama, username });
 
         if (!nama || !username) {
-            return res.status(400).json({ error: 'Nama dan username wajib diisi' });
+        return res.status(400).json({ error: "Nama dan username wajib diisi" });
         }
 
         // Check if username already exists (excluding current user)
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ? AND id != ?',
+        "SELECT id FROM users WHERE username = ? AND id != ?",
             [username, id]
         );
 
         if (existingUsers.length > 0) {
-            return res.status(400).json({ error: 'Username sudah digunakan' });
+        return res.status(400).json({ error: "Username sudah digunakan" });
         }
 
         await connection.beginTransaction();
@@ -2747,12 +3490,12 @@ app.put('/api/admin/teachers/:id', authenticateToken, requireRole(['admin']), as
         try {
             // Get current username
             const [currentUser] = await connection.execute(
-                'SELECT username FROM users WHERE id = ?',
+          "SELECT username FROM users WHERE id = ?",
                 [id]
             );
 
             if (currentUser.length === 0) {
-                return res.status(404).json({ error: 'User tidak ditemukan' });
+          return res.status(404).json({ error: "User tidak ditemukan" });
             }
 
             const oldUsername = currentUser[0].username;
@@ -2761,87 +3504,93 @@ app.put('/api/admin/teachers/:id', authenticateToken, requireRole(['admin']), as
             if (password) {
                 const hashedPassword = await bcrypt.hash(password, saltRounds);
                 await connection.execute(
-                    'UPDATE users SET username = ?, password = ? WHERE id = ?',
+            "UPDATE users SET username = ?, password = ? WHERE id = ?",
                     [username, hashedPassword, id]
                 );
             } else {
                 await connection.execute(
-                    'UPDATE users SET username = ? WHERE id = ?',
+            "UPDATE users SET username = ? WHERE id = ?",
                     [username, id]
                 );
             }
 
             // Update guru data
             await connection.execute(
-                'UPDATE guru SET nama = ?, username = ? WHERE username = ?',
+          "UPDATE guru SET nama = ?, username = ? WHERE username = ?",
                 [nama, username, oldUsername]
             );
 
             await connection.commit();
-            console.log('✅ Teacher account updated successfully');
-            res.json({ message: 'Akun guru berhasil diupdate' });
+        console.log("✅ Teacher account updated successfully");
+        res.json({ message: "Akun guru berhasil diupdate" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error updating teacher:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating teacher:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete teacher account
-app.delete('/api/admin/teachers/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/teachers/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting teacher account:', { id });
+      console.log("🗑️ Deleting teacher account:", { id });
 
         await connection.beginTransaction();
 
         try {
             // Get username first
             const [userResult] = await connection.execute(
-                'SELECT username FROM users WHERE id = ?',
+          "SELECT username FROM users WHERE id = ?",
                 [id]
             );
 
             if (userResult.length === 0) {
-                return res.status(404).json({ error: 'User tidak ditemukan' });
+          return res.status(404).json({ error: "User tidak ditemukan" });
             }
 
             const username = userResult[0].username;
 
             // Delete from guru table first (foreign key constraint)
-            await connection.execute(
-                'DELETE FROM guru WHERE username = ?',
-                [username]
-            );
+        await connection.execute("DELETE FROM guru WHERE username = ?", [
+          username,
+        ]);
 
             // Delete from users table
-            await connection.execute(
-                'DELETE FROM users WHERE id = ?',
-                [id]
-            );
+        await connection.execute("DELETE FROM users WHERE id = ?", [id]);
 
             await connection.commit();
-            console.log('✅ Teacher account deleted successfully');
-            res.json({ message: 'Akun guru berhasil dihapus' });
+        console.log("✅ Teacher account deleted successfully");
+        res.json({ message: "Akun guru berhasil dihapus" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error deleting teacher:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting teacher:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // === TEACHER DATA ENDPOINTS ===
 
 // Get teachers data for admin dashboard
-app.get('/api/admin/teachers-data', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/teachers-data",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting teachers data for admin dashboard');
+      console.log("📋 Getting teachers data for admin dashboard");
         
         const query = `
             SELECT g.id, g.nip, g.nama, g.email, g.mata_pelajaran, 
@@ -2855,29 +3604,45 @@ app.get('/api/admin/teachers-data', authenticateToken, requireRole(['admin']), a
         console.log(`✅ Teachers data retrieved: ${results.length} items`);
         res.json(results);
     } catch (error) {
-        console.error('❌ Error getting teachers data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting teachers data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Add teacher data
-app.post('/api/admin/teachers-data', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/teachers-data",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { nip, nama, email, mata_pelajaran, alamat, telepon, jenis_kelamin, status } = req.body;
-        console.log('➕ Adding teacher data:', { nip, nama, mata_pelajaran });
+      const {
+        nip,
+        nama,
+        email,
+        mata_pelajaran,
+        alamat,
+        telepon,
+        jenis_kelamin,
+        status,
+      } = req.body;
+      console.log("➕ Adding teacher data:", { nip, nama, mata_pelajaran });
 
         if (!nip || !nama || !jenis_kelamin) {
-            return res.status(400).json({ error: 'NIP, nama, dan jenis kelamin wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "NIP, nama, dan jenis kelamin wajib diisi" });
         }
 
         // Check if NIP already exists
         const [existing] = await connection.execute(
-            'SELECT id FROM guru WHERE nip = ?',
+        "SELECT id FROM guru WHERE nip = ?",
             [nip]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'NIP sudah terdaftar' });
+        return res.status(409).json({ error: "NIP sudah terdaftar" });
         }
 
         const query = `
@@ -2886,41 +3651,68 @@ app.post('/api/admin/teachers-data', authenticateToken, requireRole(['admin']), 
         `;
 
         const [result] = await connection.execute(query, [
-            nip, nama, email || null, mata_pelajaran || null, 
-            alamat || null, telepon || null, jenis_kelamin, status || 'aktif'
-        ]);
+        nip,
+        nama,
+        email || null,
+        mata_pelajaran || null,
+        alamat || null,
+        telepon || null,
+        jenis_kelamin,
+        status || "aktif",
+      ]);
 
-        console.log('✅ Teacher data added successfully:', result.insertId);
-        res.json({ message: 'Data guru berhasil ditambahkan', id: result.insertId });
+      console.log("✅ Teacher data added successfully:", result.insertId);
+      res.json({
+        message: "Data guru berhasil ditambahkan",
+        id: result.insertId,
+      });
     } catch (error) {
-        console.error('❌ Error adding teacher data:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(409).json({ error: 'NIP sudah terdaftar' });
+      console.error("❌ Error adding teacher data:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "NIP sudah terdaftar" });
         } else {
-            res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: "Internal server error" });
         }
     }
-});
+  }
+);
 
 // Update teacher data
-app.put('/api/admin/teachers-data/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/teachers-data/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        const { nip, nama, email, mata_pelajaran, alamat, telepon, jenis_kelamin, status } = req.body;
-        console.log('📝 Updating teacher data:', { id, nip, nama });
+      const {
+        nip,
+        nama,
+        email,
+        mata_pelajaran,
+        alamat,
+        telepon,
+        jenis_kelamin,
+        status,
+      } = req.body;
+      console.log("📝 Updating teacher data:", { id, nip, nama });
 
         if (!nip || !nama || !jenis_kelamin) {
-            return res.status(400).json({ error: 'NIP, nama, dan jenis kelamin wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "NIP, nama, dan jenis kelamin wajib diisi" });
         }
 
         // Check if NIP already exists for other records
         const [existing] = await connection.execute(
-            'SELECT id FROM guru WHERE nip = ? AND id != ?',
+        "SELECT id FROM guru WHERE nip = ? AND id != ?",
             [nip, id]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'NIP sudah digunakan oleh guru lain' });
+        return res
+          .status(409)
+          .json({ error: "NIP sudah digunakan oleh guru lain" });
         }
 
         const updateQuery = `
@@ -2931,49 +3723,66 @@ app.put('/api/admin/teachers-data/:id', authenticateToken, requireRole(['admin']
         `;
 
         const [result] = await connection.execute(updateQuery, [
-            nip, nama, email || null, mata_pelajaran || null,
-            alamat || null, telepon || null, jenis_kelamin, status || 'aktif', id
+        nip,
+        nama,
+        email || null,
+        mata_pelajaran || null,
+        alamat || null,
+        telepon || null,
+        jenis_kelamin,
+        status || "aktif",
+        id,
         ]);
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Data guru tidak ditemukan' });
+        return res.status(404).json({ error: "Data guru tidak ditemukan" });
         }
 
-        console.log('✅ Teacher data updated successfully');
-        res.json({ message: 'Data guru berhasil diupdate' });
+      console.log("✅ Teacher data updated successfully");
+      res.json({ message: "Data guru berhasil diupdate" });
     } catch (error) {
-        console.error('❌ Error updating teacher data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating teacher data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete teacher data
-app.delete('/api/admin/teachers-data/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/teachers-data/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting teacher data:', { id });
+      console.log("🗑️ Deleting teacher data:", { id });
 
         const [result] = await connection.execute(
-            'DELETE FROM guru WHERE id = ?',
+        "DELETE FROM guru WHERE id = ?",
             [id]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Data guru tidak ditemukan' });
+        return res.status(404).json({ error: "Data guru tidak ditemukan" });
         }
 
-        console.log('✅ Teacher data deleted successfully');
-        res.json({ message: 'Data guru berhasil dihapus' });
+      console.log("✅ Teacher data deleted successfully");
+      res.json({ message: "Data guru berhasil dihapus" });
     } catch (error) {
-        console.error('❌ Error deleting teacher data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting teacher data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get students for admin dashboard
-app.get('/api/admin/students', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/students",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting students for admin dashboard');
+      console.log("📋 Getting students for admin dashboard");
         
         const query = `
             SELECT 
@@ -3000,29 +3809,36 @@ app.get('/api/admin/students', authenticateToken, requireRole(['admin']), async 
         console.log(`✅ Students retrieved: ${results.length} items`);
         res.json(results);
     } catch (error) {
-        console.error('❌ Error getting students:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting students:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Add student account
-app.post('/api/admin/students', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/students",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { nama, username, password } = req.body;
-        console.log('➕ Adding student account:', { nama, username });
+      console.log("➕ Adding student account:", { nama, username });
 
         if (!nama || !username || !password) {
-            return res.status(400).json({ error: 'Nama, username, dan password wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "Nama, username, dan password wajib diisi" });
         }
 
         // Check if username already exists
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ?',
+        "SELECT id FROM users WHERE username = ?",
             [username]
         );
 
         if (existingUsers.length > 0) {
-            return res.status(400).json({ error: 'Username sudah digunakan' });
+        return res.status(400).json({ error: "Username sudah digunakan" });
         }
 
         // Hash password
@@ -3034,49 +3850,54 @@ app.post('/api/admin/students', authenticateToken, requireRole(['admin']), async
         try {
             // Insert user account
             const [userResult] = await connection.execute(
-                'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-                [username, hashedPassword, 'siswa']
+          "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+          [username, hashedPassword, "siswa"]
             );
 
             // Insert siswa_perwakilan data with generated NIS
             const nis = `S${Date.now().toString().slice(-8)}`; // Generate simple NIS
             await connection.execute(
-                'INSERT INTO siswa_perwakilan (nis, nama, username, kelas_id, jenis_kelamin, status) VALUES (?, ?, ?, ?, ?, ?)',
-                [nis, nama, username, 1, 'L', 'aktif'] // Default to kelas_id = 1
+          "INSERT INTO siswa_perwakilan (nis, nama, username, kelas_id, jenis_kelamin, status) VALUES (?, ?, ?, ?, ?, ?)",
+          [nis, nama, username, 1, "L", "aktif"] // Default to kelas_id = 1
             );
 
             await connection.commit();
-            console.log('✅ Student account added successfully');
-            res.json({ message: 'Akun siswa berhasil ditambahkan' });
+        console.log("✅ Student account added successfully");
+        res.json({ message: "Akun siswa berhasil ditambahkan" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error adding student:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error adding student:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Update student account
-app.put('/api/admin/students/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/students/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
         const { nama, username, password } = req.body;
-        console.log('📝 Updating student account:', { id, nama, username });
+      console.log("📝 Updating student account:", { id, nama, username });
 
         if (!nama || !username) {
-            return res.status(400).json({ error: 'Nama dan username wajib diisi' });
+        return res.status(400).json({ error: "Nama dan username wajib diisi" });
         }
 
         // Check if username already exists (excluding current user)
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ? AND id != ?',
+        "SELECT id FROM users WHERE username = ? AND id != ?",
             [username, id]
         );
 
         if (existingUsers.length > 0) {
-            return res.status(400).json({ error: 'Username sudah digunakan' });
+        return res.status(400).json({ error: "Username sudah digunakan" });
         }
 
         await connection.beginTransaction();
@@ -3084,12 +3905,12 @@ app.put('/api/admin/students/:id', authenticateToken, requireRole(['admin']), as
         try {
             // Get current username
             const [currentUser] = await connection.execute(
-                'SELECT username FROM users WHERE id = ?',
+          "SELECT username FROM users WHERE id = ?",
                 [id]
             );
 
             if (currentUser.length === 0) {
-                return res.status(404).json({ error: 'User tidak ditemukan' });
+          return res.status(404).json({ error: "User tidak ditemukan" });
             }
 
             const oldUsername = currentUser[0].username;
@@ -3098,87 +3919,94 @@ app.put('/api/admin/students/:id', authenticateToken, requireRole(['admin']), as
             if (password) {
                 const hashedPassword = await bcrypt.hash(password, saltRounds);
                 await connection.execute(
-                    'UPDATE users SET username = ?, password = ? WHERE id = ?',
+            "UPDATE users SET username = ?, password = ? WHERE id = ?",
                     [username, hashedPassword, id]
                 );
             } else {
                 await connection.execute(
-                    'UPDATE users SET username = ? WHERE id = ?',
+            "UPDATE users SET username = ? WHERE id = ?",
                     [username, id]
                 );
             }
 
             // Update siswa_perwakilan data
             await connection.execute(
-                'UPDATE siswa_perwakilan SET nama = ?, username = ? WHERE username = ?',
+          "UPDATE siswa_perwakilan SET nama = ?, username = ? WHERE username = ?",
                 [nama, username, oldUsername]
             );
 
             await connection.commit();
-            console.log('✅ Student account updated successfully');
-            res.json({ message: 'Akun siswa berhasil diupdate' });
+        console.log("✅ Student account updated successfully");
+        res.json({ message: "Akun siswa berhasil diupdate" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error updating student:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating student:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete student account
-app.delete('/api/admin/students/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/students/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting student account:', { id });
+      console.log("🗑️ Deleting student account:", { id });
 
         await connection.beginTransaction();
 
         try {
             // Get username first
             const [userResult] = await connection.execute(
-                'SELECT username FROM users WHERE id = ?',
+          "SELECT username FROM users WHERE id = ?",
                 [id]
             );
 
             if (userResult.length === 0) {
-                return res.status(404).json({ error: 'User tidak ditemukan' });
+          return res.status(404).json({ error: "User tidak ditemukan" });
             }
 
             const username = userResult[0].username;
 
             // Delete from siswa_perwakilan table first (foreign key constraint)
             await connection.execute(
-                'DELETE FROM siswa_perwakilan WHERE username = ?',
+          "DELETE FROM siswa_perwakilan WHERE username = ?",
                 [username]
             );
 
             // Delete from users table
-            await connection.execute(
-                'DELETE FROM users WHERE id = ?',
-                [id]
-            );
+        await connection.execute("DELETE FROM users WHERE id = ?", [id]);
 
             await connection.commit();
-            console.log('✅ Student account deleted successfully');
-            res.json({ message: 'Akun siswa berhasil dihapus' });
+        console.log("✅ Student account deleted successfully");
+        res.json({ message: "Akun siswa berhasil dihapus" });
         } catch (error) {
             await connection.rollback();
             throw error;
         }
     } catch (error) {
-        console.error('❌ Error deleting student:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting student:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // === STUDENT DATA ENDPOINTS ===
 
 // Get students data for admin dashboard
-app.get('/api/admin/students-data', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/students-data",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📋 Getting students data for admin dashboard');
+      console.log("📋 Getting students data for admin dashboard");
         
         const query = `
             SELECT sp.id, sp.nis, sp.nama, sp.kelas_id, k.nama_kelas, 
@@ -3193,29 +4021,44 @@ app.get('/api/admin/students-data', authenticateToken, requireRole(['admin']), a
         console.log(`✅ Students data retrieved: ${results.length} items`);
         res.json(results);
     } catch (error) {
-        console.error('❌ Error getting students data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting students data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Add student data
-app.post('/api/admin/students-data', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.post(
+  "/api/admin/students-data",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        const { nis, nama, kelas_id, jenis_kelamin, alamat, telepon_orangtua, status } = req.body;
-        console.log('➕ Adding student data:', { nis, nama, kelas_id });
+      const {
+        nis,
+        nama,
+        kelas_id,
+        jenis_kelamin,
+        alamat,
+        telepon_orangtua,
+        status,
+      } = req.body;
+      console.log("➕ Adding student data:", { nis, nama, kelas_id });
 
         if (!nis || !nama || !kelas_id || !jenis_kelamin) {
-            return res.status(400).json({ error: 'NIS, nama, kelas, dan jenis kelamin wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "NIS, nama, kelas, dan jenis kelamin wajib diisi" });
         }
 
         // Check if NIS already exists
         const [existing] = await connection.execute(
-            'SELECT id FROM siswa_perwakilan WHERE nis = ?',
+        "SELECT id FROM siswa_perwakilan WHERE nis = ?",
             [nis]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'NIS sudah terdaftar' });
+        return res.status(409).json({ error: "NIS sudah terdaftar" });
         }
 
         const insertQuery = `
@@ -3224,41 +4067,66 @@ app.post('/api/admin/students-data', authenticateToken, requireRole(['admin']), 
         `;
 
         const [result] = await connection.execute(insertQuery, [
-            nis, nama, kelas_id, jenis_kelamin, 
-            alamat || null, telepon_orangtua || null, status || 'aktif'
-        ]);
+        nis,
+        nama,
+        kelas_id,
+        jenis_kelamin,
+        alamat || null,
+        telepon_orangtua || null,
+        status || "aktif",
+      ]);
 
-        console.log('✅ Student data added successfully:', result.insertId);
-        res.json({ message: 'Data siswa berhasil ditambahkan', id: result.insertId });
+      console.log("✅ Student data added successfully:", result.insertId);
+      res.json({
+        message: "Data siswa berhasil ditambahkan",
+        id: result.insertId,
+      });
     } catch (error) {
-        console.error('❌ Error adding student data:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.status(409).json({ error: 'NIS sudah terdaftar' });
+      console.error("❌ Error adding student data:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "NIS sudah terdaftar" });
         } else {
-            res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: "Internal server error" });
         }
     }
-});
+  }
+);
 
 // Update student data
-app.put('/api/admin/students-data/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.put(
+  "/api/admin/students-data/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        const { nis, nama, kelas_id, jenis_kelamin, alamat, telepon_orangtua, status } = req.body;
-        console.log('📝 Updating student data:', { id, nis, nama });
+      const {
+        nis,
+        nama,
+        kelas_id,
+        jenis_kelamin,
+        alamat,
+        telepon_orangtua,
+        status,
+      } = req.body;
+      console.log("📝 Updating student data:", { id, nis, nama });
 
         if (!nis || !nama || !kelas_id || !jenis_kelamin) {
-            return res.status(400).json({ error: 'NIS, nama, kelas, dan jenis kelamin wajib diisi' });
+        return res
+          .status(400)
+          .json({ error: "NIS, nama, kelas, dan jenis kelamin wajib diisi" });
         }
 
         // Check if NIS already exists for other records
         const [existing] = await connection.execute(
-            'SELECT id FROM siswa_perwakilan WHERE nis = ? AND id != ?',
+        "SELECT id FROM siswa_perwakilan WHERE nis = ? AND id != ?",
             [nis, id]
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: 'NIS sudah digunakan oleh siswa lain' });
+        return res
+          .status(409)
+          .json({ error: "NIS sudah digunakan oleh siswa lain" });
         }
 
         const updateQuery = `
@@ -3269,54 +4137,78 @@ app.put('/api/admin/students-data/:id', authenticateToken, requireRole(['admin']
         `;
 
         const [result] = await connection.execute(updateQuery, [
-            nis, nama, kelas_id, jenis_kelamin,
-            alamat || null, telepon_orangtua || null, status || 'aktif', id
+        nis,
+        nama,
+        kelas_id,
+        jenis_kelamin,
+        alamat || null,
+        telepon_orangtua || null,
+        status || "aktif",
+        id,
         ]);
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Data siswa tidak ditemukan' });
+        return res.status(404).json({ error: "Data siswa tidak ditemukan" });
         }
 
-        console.log('✅ Student data updated successfully');
-        res.json({ message: 'Data siswa berhasil diupdate' });
+      console.log("✅ Student data updated successfully");
+      res.json({ message: "Data siswa berhasil diupdate" });
     } catch (error) {
-        console.error('❌ Error updating student data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error updating student data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Delete student data
-app.delete('/api/admin/students-data/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.delete(
+  "/api/admin/students-data/:id",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { id } = req.params;
-        console.log('🗑️ Deleting student data:', { id });
+      console.log("🗑️ Deleting student data:", { id });
 
         const [result] = await connection.execute(
-            'DELETE FROM siswa_perwakilan WHERE id = ?',
+        "DELETE FROM siswa_perwakilan WHERE id = ?",
             [id]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Data siswa tidak ditemukan' });
+        return res.status(404).json({ error: "Data siswa tidak ditemukan" });
         }
 
-        console.log('✅ Student data deleted successfully');
-        res.json({ message: 'Data siswa berhasil dihapus' });
+      console.log("✅ Student data deleted successfully");
+      res.json({ message: "Data siswa berhasil dihapus" });
     } catch (error) {
-        console.error('❌ Error deleting student data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error deleting student data:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get live summary for admin dashboard
-app.get('/api/admin/live-summary', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/live-summary",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
-        console.log('📊 Getting live summary for admin dashboard');
+      console.log("📊 Getting live summary for admin dashboard");
         
         // Get current day and time
         const now = new Date();
-        const currentTime = now.toLocaleTimeString('en-GB', { hour12: false }); // HH:mm:ss format
-        const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const currentTime = now.toLocaleTimeString("en-GB", { hour12: false }); // HH:mm:ss format
+      const days = [
+        "Minggu",
+        "Senin",
+        "Selasa",
+        "Rabu",
+        "Kamis",
+        "Jumat",
+        "Sabtu",
+      ];
         const currentDay = days[now.getDay()];
 
         // Get ongoing classes (classes that are currently happening)
@@ -3340,7 +4232,10 @@ app.get('/api/admin/live-summary', authenticateToken, requireRole(['admin']), as
             ORDER BY j.jam_mulai
         `;
 
-        const [ongoingClasses] = await connection.execute(ongoingQuery, [currentDay, currentTime]);
+      const [ongoingClasses] = await connection.execute(ongoingQuery, [
+        currentDay,
+        currentTime,
+      ]);
         
         // Calculate overall attendance percentage for today
         const attendanceQuery = `
@@ -3352,105 +4247,150 @@ app.get('/api/admin/live-summary', authenticateToken, requireRole(['admin']), as
             WHERE j.hari = ?
         `;
         
-        const [attendanceResult] = await connection.execute(attendanceQuery, [currentDay]);
+      const [attendanceResult] = await connection.execute(attendanceQuery, [
+        currentDay,
+      ]);
         const attendanceStats = attendanceResult[0];
         
-        const attendancePercentage = attendanceStats.total_jadwal_today > 0 
-            ? Math.round((attendanceStats.jadwal_with_attendance / attendanceStats.total_jadwal_today) * 100)
+      const attendancePercentage =
+        attendanceStats.total_jadwal_today > 0
+          ? Math.round(
+              (attendanceStats.jadwal_with_attendance /
+                attendanceStats.total_jadwal_today) *
+                100
+            )
             : 0;
 
         // Format ongoing classes data
-        const formattedOngoingClasses = ongoingClasses.map(kelas => ({
+      const formattedOngoingClasses = ongoingClasses.map((kelas) => ({
             kelas: kelas.nama_kelas,
             guru: kelas.nama_guru,
             mapel: kelas.nama_mapel,
-            jam: `${kelas.jam_mulai.substring(0,5)} - ${kelas.jam_selesai.substring(0,5)}`,
+        jam: `${kelas.jam_mulai.substring(
+          0,
+          5
+        )} - ${kelas.jam_selesai.substring(0, 5)}`,
             nama_kelas: kelas.nama_kelas,
             nama_mapel: kelas.nama_mapel,
             nama_guru: kelas.nama_guru,
-            jam_mulai: kelas.jam_mulai.substring(0,5),
-            jam_selesai: kelas.jam_selesai.substring(0,5),
-            absensi_diambil: kelas.absensi_diambil
+        jam_mulai: kelas.jam_mulai.substring(0, 5),
+        jam_selesai: kelas.jam_selesai.substring(0, 5),
+        absensi_diambil: kelas.absensi_diambil,
         }));
 
         const liveData = {
             ongoing_classes: formattedOngoingClasses,
-            overall_attendance_percentage: attendancePercentage.toString()
+        overall_attendance_percentage: attendancePercentage.toString(),
         };
 
-        console.log(`✅ Live summary retrieved: ${formattedOngoingClasses.length} ongoing classes, ${attendancePercentage}% attendance`);
+      console.log(
+        `✅ Live summary retrieved: ${formattedOngoingClasses.length} ongoing classes, ${attendancePercentage}% attendance`
+      );
         res.json(liveData);
     } catch (error) {
-        console.error('❌ Error getting live summary:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting live summary:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // ENDPOINTS UNTUK PENGAJUAN IZIN KELAS
 // ================================================
 
 // Get daftar siswa in class for siswa perwakilan
-app.get('/api/siswa/:siswaId/daftar-siswa', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa/:siswaId/daftar-siswa",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
-        console.log('📋 Getting daftar siswa for class representative:', siswaId);
+      console.log("📋 Getting daftar siswa for class representative:", siswaId);
 
         // Get the class of the siswa perwakilan
         const [kelasData] = await connection.execute(
-            'SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?',
+        "SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?",
             [siswaId]
         );
 
         if (kelasData.length === 0) {
-            return res.status(404).json({ error: 'Siswa tidak ditemukan' });
+        return res.status(404).json({ error: "Siswa tidak ditemukan" });
         }
 
         const kelasId = kelasData[0].kelas_id;
 
         // Get all students in the same class
-        const [siswaData] = await connection.execute(`
+      const [siswaData] = await connection.execute(
+        `
             SELECT id_siswa as id, nama 
             FROM siswa_perwakilan 
             WHERE kelas_id = ? 
             ORDER BY nama ASC
-        `, [kelasId]);
+        `,
+        [kelasId]
+      );
 
         console.log(`✅ Daftar siswa retrieved: ${siswaData.length} students`);
         res.json(siswaData);
     } catch (error) {
-        console.error('❌ Error getting daftar siswa:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting daftar siswa:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Submit pengajuan izin kelas
-app.post('/api/siswa/:siswaId/pengajuan-izin-kelas', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/siswa/:siswaId/pengajuan-izin-kelas",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
         const { jadwal_id, tanggal_izin, siswa_izin } = req.body;
-        console.log('📝 Submitting pengajuan izin kelas:', { siswaId, jadwal_id, tanggal_izin, siswaCount: siswa_izin.length });
+      console.log("📝 Submitting pengajuan izin kelas:", {
+        siswaId,
+        jadwal_id,
+        tanggal_izin,
+        siswaCount: siswa_izin.length,
+      });
 
         // Validation
-        if (!jadwal_id || !tanggal_izin || !siswa_izin || siswa_izin.length === 0) {
-            return res.status(400).json({ error: 'Semua field wajib diisi dan minimal 1 siswa harus dipilih' });
+      if (
+        !jadwal_id ||
+        !tanggal_izin ||
+        !siswa_izin ||
+        siswa_izin.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            error: "Semua field wajib diisi dan minimal 1 siswa harus dipilih",
+          });
         }
 
         // Validate all students have required fields
         for (const siswa of siswa_izin) {
             if (!siswa.nama || !siswa.jenis_izin || !siswa.alasan) {
-                return res.status(400).json({ error: 'Semua siswa harus memiliki nama, jenis izin, dan alasan' });
+          return res
+            .status(400)
+            .json({
+              error: "Semua siswa harus memiliki nama, jenis izin, dan alasan",
+            });
             }
         }
 
         // Get siswa perwakilan's class
         const [kelasData] = await connection.execute(
-            'SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?',
+        "SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?",
             [siswaId]
         );
 
         if (kelasData.length === 0) {
-            return res.status(404).json({ error: 'Siswa perwakilan tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Siswa perwakilan tidak ditemukan" });
         }
 
         const kelasId = kelasData[0].kelas_id;
@@ -3469,30 +4409,41 @@ app.post('/api/siswa/:siswaId/pengajuan-izin-kelas', authenticateToken, requireR
             await connection.execute(
                 `INSERT INTO pengajuan_izin_detail (pengajuan_id, nama_siswa, jenis_izin, alasan, bukti_pendukung)
                  VALUES (?, ?, ?, ?, ?)`,
-                [pengajuanId, siswa.nama, siswa.jenis_izin, siswa.alasan, siswa.bukti_pendukung || null]
-            );
-        }
+          [
+            pengajuanId,
+            siswa.nama,
+            siswa.jenis_izin,
+            siswa.alasan,
+            siswa.bukti_pendukung || null,
+          ]
+        );
+      }
 
-        console.log('✅ Pengajuan izin kelas submitted successfully');
+      console.log("✅ Pengajuan izin kelas submitted successfully");
         res.json({ 
             message: `Pengajuan izin untuk ${siswa_izin.length} siswa berhasil dikirim`,
-            id: pengajuanId 
+        id: pengajuanId,
         });
     } catch (error) {
-        console.error('❌ Error submitting pengajuan izin kelas:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error submitting pengajuan izin kelas:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // ENDPOINTS UNTUK BANDING ABSEN
 // ================================================
 
 // Get banding absen for student
-app.get('/api/siswa/:siswaId/banding-absen', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.get(
+  "/api/siswa/:siswaId/banding-absen",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
-        console.log('📋 Getting banding absen for siswa:', siswaId);
+      console.log("📋 Getting banding absen for siswa:", siswaId);
 
         const query = `
             SELECT 
@@ -3527,25 +4478,52 @@ app.get('/api/siswa/:siswaId/banding-absen', authenticateToken, requireRole(['si
         console.log(`✅ Banding absen retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting banding absen:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting banding absen:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Submit banding absen
-app.post('/api/siswa/:siswaId/banding-absen', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/siswa/:siswaId/banding-absen",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
-        const { jadwal_id, tanggal_absen, status_asli, status_diajukan, alasan_banding } = req.body;
-        console.log('📝 Submitting banding absen:', { siswaId, jadwal_id, tanggal_absen, status_asli, status_diajukan });
+      const {
+        jadwal_id,
+        tanggal_absen,
+        status_asli,
+        status_diajukan,
+        alasan_banding,
+      } = req.body;
+      console.log("📝 Submitting banding absen:", {
+        siswaId,
+        jadwal_id,
+        tanggal_absen,
+        status_asli,
+        status_diajukan,
+      });
 
         // Validation
-        if (!jadwal_id || !tanggal_absen || !status_asli || !status_diajukan || !alasan_banding) {
-            return res.status(400).json({ error: 'Semua field wajib diisi' });
+      if (
+        !jadwal_id ||
+        !tanggal_absen ||
+        !status_asli ||
+        !status_diajukan ||
+        !alasan_banding
+      ) {
+        return res.status(400).json({ error: "Semua field wajib diisi" });
         }
 
         if (status_asli === status_diajukan) {
-            return res.status(400).json({ error: 'Status asli dan status yang diajukan tidak boleh sama' });
+        return res
+          .status(400)
+          .json({
+            error: "Status asli dan status yang diajukan tidak boleh sama",
+          });
         }
 
         // Check if banding already exists for this combination
@@ -3555,7 +4533,12 @@ app.post('/api/siswa/:siswaId/banding-absen', authenticateToken, requireRole(['s
         );
 
         if (existing.length > 0) {
-            return res.status(400).json({ error: 'Banding untuk jadwal dan tanggal ini sudah pernah diajukan dan sedang diproses' });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Banding untuk jadwal dan tanggal ini sudah pernah diajukan dan sedang diproses",
+          });
         }
 
         // Insert banding absen
@@ -3563,47 +4546,85 @@ app.post('/api/siswa/:siswaId/banding-absen', authenticateToken, requireRole(['s
             `INSERT INTO pengajuan_banding_absen 
             (siswa_id, jadwal_id, tanggal_absen, status_asli, status_diajukan, alasan_banding)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [siswaId, jadwal_id, tanggal_absen, status_asli, status_diajukan, alasan_banding]
-        );
+        [
+          siswaId,
+          jadwal_id,
+          tanggal_absen,
+          status_asli,
+          status_diajukan,
+          alasan_banding,
+        ]
+      );
 
-        console.log('✅ Banding absen submitted successfully');
+      console.log("✅ Banding absen submitted successfully");
         res.json({ 
-            message: 'Banding absen berhasil dikirim',
-            id: result.insertId 
+        message: "Banding absen berhasil dikirim",
+        id: result.insertId,
         });
     } catch (error) {
-        console.error('❌ Error submitting banding absen:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error submitting banding absen:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Submit banding absen kelas
-app.post('/api/siswa/:siswaId/banding-absen-kelas', authenticateToken, requireRole(['siswa']), async (req, res) => {
+app.post(
+  "/api/siswa/:siswaId/banding-absen-kelas",
+  authenticateToken,
+  requireRole(["siswa"]),
+  async (req, res) => {
     try {
         const { siswaId } = req.params;
         const { jadwal_id, tanggal_absen, siswa_banding } = req.body;
-        console.log('📝 Submitting banding absen kelas:', { siswaId, jadwal_id, tanggal_absen, siswaCount: siswa_banding.length });
+      console.log("📝 Submitting banding absen kelas:", {
+        siswaId,
+        jadwal_id,
+        tanggal_absen,
+        siswaCount: siswa_banding.length,
+      });
 
         // Validation
-        if (!jadwal_id || !tanggal_absen || !siswa_banding || siswa_banding.length === 0) {
-            return res.status(400).json({ error: 'Semua field wajib diisi dan minimal 1 siswa harus dipilih' });
+      if (
+        !jadwal_id ||
+        !tanggal_absen ||
+        !siswa_banding ||
+        siswa_banding.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            error: "Semua field wajib diisi dan minimal 1 siswa harus dipilih",
+          });
         }
 
         // Validate all students have required fields
         for (const siswa of siswa_banding) {
-            if (!siswa.nama || !siswa.status_asli || !siswa.status_diajukan || !siswa.alasan_banding) {
-                return res.status(400).json({ error: 'Semua siswa harus memiliki nama, status asli, status diajukan, dan alasan banding' });
+        if (
+          !siswa.nama ||
+          !siswa.status_asli ||
+          !siswa.status_diajukan ||
+          !siswa.alasan_banding
+        ) {
+          return res
+            .status(400)
+            .json({
+              error:
+                "Semua siswa harus memiliki nama, status asli, status diajukan, dan alasan banding",
+            });
             }
         }
 
         // Get siswa perwakilan's class
         const [kelasData] = await connection.execute(
-            'SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?',
+        "SELECT kelas_id FROM siswa_perwakilan WHERE id_siswa = ?",
             [siswaId]
         );
 
         if (kelasData.length === 0) {
-            return res.status(404).json({ error: 'Siswa perwakilan tidak ditemukan' });
+        return res
+          .status(404)
+          .json({ error: "Siswa perwakilan tidak ditemukan" });
         }
 
         const kelasId = kelasData[0].kelas_id;
@@ -3622,26 +4643,38 @@ app.post('/api/siswa/:siswaId/banding-absen-kelas', authenticateToken, requireRo
             await connection.execute(
                 `INSERT INTO banding_absen_detail (banding_id, nama_siswa, status_asli, status_diajukan, alasan_banding, bukti_pendukung)
                  VALUES (?, ?, ?, ?, ?, ?)`,
-                [bandingId, siswa.nama, siswa.status_asli, siswa.status_diajukan, siswa.alasan_banding, siswa.bukti_pendukung || null]
-            );
-        }
+          [
+            bandingId,
+            siswa.nama,
+            siswa.status_asli,
+            siswa.status_diajukan,
+            siswa.alasan_banding,
+            siswa.bukti_pendukung || null,
+          ]
+        );
+      }
 
-        console.log('✅ Banding absen kelas submitted successfully');
+      console.log("✅ Banding absen kelas submitted successfully");
         res.json({ 
             message: `Pengajuan banding absen untuk ${siswa_banding.length} siswa berhasil dikirim`,
-            id: bandingId 
+        id: bandingId,
         });
     } catch (error) {
-        console.error('❌ Error submitting banding absen kelas:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error submitting banding absen kelas:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Get banding absen for teacher to process
-app.get('/api/guru/:guruId/banding-absen', authenticateToken, requireRole(['guru']), async (req, res) => {
+app.get(
+  "/api/guru/:guruId/banding-absen",
+  authenticateToken,
+  requireRole(["guru"]),
+  async (req, res) => {
     try {
         const { guruId } = req.params;
-        console.log('📋 Getting banding absen for guru:', guruId);
+      console.log("📋 Getting banding absen for guru:", guruId);
 
         const query = `
             SELECT 
@@ -3676,23 +4709,37 @@ app.get('/api/guru/:guruId/banding-absen', authenticateToken, requireRole(['guru
         console.log(`✅ Banding absen for guru retrieved: ${rows.length} items`);
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting banding absen for guru:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting banding absen for guru:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Process banding absen by teacher
-app.put('/api/banding-absen/:bandingId/respond', authenticateToken, requireRole(['guru']), async (req, res) => {
+app.put(
+  "/api/banding-absen/:bandingId/respond",
+  authenticateToken,
+  requireRole(["guru"]),
+  async (req, res) => {
     try {
         const { bandingId } = req.params;
         const { status_banding, catatan_guru, diproses_oleh } = req.body;
         const guruId = diproses_oleh || req.user.guru_id || req.user.id;
         
-        console.log('📝 Guru processing banding absen:', { bandingId, status_banding, guruId });
+      console.log("📝 Guru processing banding absen:", {
+        bandingId,
+        status_banding,
+        guruId,
+      });
 
         // Validation
-        if (!status_banding || !['disetujui', 'ditolak'].includes(status_banding)) {
-            return res.status(400).json({ error: 'Status harus disetujui atau ditolak' });
+      if (
+        !status_banding ||
+        !["disetujui", "ditolak"].includes(status_banding)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Status harus disetujui atau ditolak" });
         }
 
         // Update banding absen
@@ -3700,53 +4747,74 @@ app.put('/api/banding-absen/:bandingId/respond', authenticateToken, requireRole(
             `UPDATE pengajuan_banding_absen 
              SET status_banding = ?, catatan_guru = ?, tanggal_keputusan = NOW(), diproses_oleh = ?
              WHERE id_banding = ?`,
-            [status_banding, catatan_guru || '', guruId, bandingId]
+        [status_banding, catatan_guru || "", guruId, bandingId]
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Banding absen tidak ditemukan' });
+        return res.status(404).json({ error: "Banding absen tidak ditemukan" });
         }
 
-        console.log('✅ Banding absen response submitted successfully');
+      console.log("✅ Banding absen response submitted successfully");
         res.json({ 
-            message: `Banding absen berhasil ${status_banding === 'disetujui' ? 'disetujui' : 'ditolak'}`,
-            id: bandingId
+        message: `Banding absen berhasil ${
+          status_banding === "disetujui" ? "disetujui" : "ditolak"
+        }`,
+        id: bandingId,
         });
     } catch (error) {
-        console.error('❌ Error responding to banding absen:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error responding to banding absen:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // ================================================
 // SERVER INITIALIZATION
 // ================================================
 
 // Initialize database connection and start server
-connectToDatabase().then(() => {
+connectToDatabase()
+  .then(() => {
     app.listen(port, () => {
         console.log(`🚀 ABSENTA Modern Server running on port ${port}`);
         console.log(`🌍 Environment: ${NODE_ENV}`);
         console.log(`🌐 Server URL: http://localhost:${port}`);
-        console.log(`📊 Health Check: http://localhost:${port}/api/verify`);
+      console.log(`📊 Health Check: http://localhost:${port}/health`);
         console.log(`🔐 JWT Secret: ${JWT_SECRET.substring(0, 10)}...`);
         
         const config = getDbConfig();
-        console.log(`🔌 Database: ${config.host}:${config.port}/${config.database}`);
-        
-        if (NODE_ENV === 'production') {
-            console.log('🚀 Production mode enabled');
-            console.log('🔒 Secure cookies enabled');
-            console.log('🌐 CORS configured for production');
+      console.log(
+        `🔌 Database: ${config.host}:${config.port}/${config.database}`
+      );
+
+      if (NODE_ENV === "production") {
+        console.log("🚀 Production mode enabled");
+        console.log("🔒 Secure cookies enabled");
+        console.log("🌐 CORS configured for production");
         } else {
         console.log(`📱 Frontend should connect to this server`);
         console.log(`🔑 Admin login: admin / admin123`);
         console.log(`👨‍🏫 Guru login: guru_matematika / guru123`);
         console.log(`👨‍🎓 Siswa login: perwakilan_x_ipa1 / siswa123`);
         }
+
+      console.log(`\n📋 Available Public Endpoints:`);
+      console.log(`   • GET  /health          - Server health check`);
+      console.log(`   • GET  /api/health      - Detailed health status`);
+      console.log(`   • GET  /status          - Server status`);
+      console.log(`   • GET  /api/info        - Server information`);
+      console.log(`   • GET  /api/db-test     - Database connection test`);
+
+      console.log(`\n🔐 Authentication Endpoints:`);
+      console.log(`   • POST /api/login       - User login`);
+      console.log(`   • POST /api/logout      - User logout`);
+      console.log(`   • GET  /api/verify     - Verify JWT token`);
+
+      console.log(`\n✅ Server ready to accept requests!`);
     });
-}).catch(error => {
-    console.error('❌ Failed to start server:', error);
+  })
+  .catch((error) => {
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
 });
 
@@ -3755,10 +4823,20 @@ connectToDatabase().then(() => {
 // ================================================
 
 // Get riwayat pengajuan izin for admin
-app.get('/api/admin/riwayat-izin-report', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/riwayat-izin-report",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id, jenis_izin, status } = req.query;
-        console.log('📊 Getting riwayat pengajuan izin report:', { startDate, endDate, kelas_id, jenis_izin, status });
+      console.log("📊 Getting riwayat pengajuan izin report:", {
+        startDate,
+        endDate,
+        kelas_id,
+        jenis_izin,
+        status,
+      });
 
         let query = `
             SELECT 
@@ -3794,42 +4872,53 @@ app.get('/api/admin/riwayat-izin-report', authenticateToken, requireRole(['admin
         const params = [];
         
         if (startDate && endDate) {
-            query += ' AND DATE(pi.tanggal_pengajuan) BETWEEN ? AND ?';
+        query += " AND DATE(pi.tanggal_pengajuan) BETWEEN ? AND ?";
             params.push(startDate, endDate);
         }
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        if (jenis_izin && jenis_izin !== '') {
-            query += ' AND pi.jenis_izin = ?';
+      if (jenis_izin && jenis_izin !== "") {
+        query += " AND pi.jenis_izin = ?";
             params.push(jenis_izin);
         }
         
-        if (status && status !== '') {
-            query += ' AND pi.status = ?';
+      if (status && status !== "") {
+        query += " AND pi.status = ?";
             params.push(status);
         }
         
-        query += ' ORDER BY pi.tanggal_pengajuan DESC';
+      query += " ORDER BY pi.tanggal_pengajuan DESC";
         
         const [rows] = await connection.execute(query, params);
         console.log(`✅ Found ${rows.length} riwayat pengajuan izin records`);
         
         res.json(rows);
     } catch (error) {
-        console.error('❌ Error getting riwayat pengajuan izin report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Error getting riwayat pengajuan izin report:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Download riwayat pengajuan izin report as CSV
-app.get('/api/admin/download-riwayat-izin', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get(
+  "/api/admin/download-riwayat-izin",
+  authenticateToken,
+  requireRole(["admin"]),
+  async (req, res) => {
     try {
         const { startDate, endDate, kelas_id, jenis_izin, status } = req.query;
-        console.log('📊 Downloading riwayat pengajuan izin report:', { startDate, endDate, kelas_id, jenis_izin, status });
+      console.log("📊 Downloading riwayat pengajuan izin report:", {
+        startDate,
+        endDate,
+        kelas_id,
+        jenis_izin,
+        status,
+      });
 
         let query = `
             SELECT 
@@ -3864,54 +4953,66 @@ app.get('/api/admin/download-riwayat-izin', authenticateToken, requireRole(['adm
         const params = [];
         
         if (startDate && endDate) {
-            query += ' AND DATE(pi.tanggal_pengajuan) BETWEEN ? AND ?';
+        query += " AND DATE(pi.tanggal_pengajuan) BETWEEN ? AND ?";
             params.push(startDate, endDate);
         }
         
-        if (kelas_id && kelas_id !== '') {
-            query += ' AND k.id_kelas = ?';
+      if (kelas_id && kelas_id !== "") {
+        query += " AND k.id_kelas = ?";
             params.push(kelas_id);
         }
         
-        if (jenis_izin && jenis_izin !== '') {
-            query += ' AND pi.jenis_izin = ?';
+      if (jenis_izin && jenis_izin !== "") {
+        query += " AND pi.jenis_izin = ?";
             params.push(jenis_izin);
         }
         
-        if (status && status !== '') {
-            query += ' AND pi.status = ?';
+      if (status && status !== "") {
+        query += " AND pi.status = ?";
             params.push(status);
         }
         
-        query += ' ORDER BY pi.tanggal_pengajuan DESC';
+      query += " ORDER BY pi.tanggal_pengajuan DESC";
         
         const [rows] = await connection.execute(query, params);
 
         // Enhanced CSV format with UTF-8 BOM for Excel compatibility
-        let csvContent = '\uFEFF'; // UTF-8 BOM
-        csvContent += 'Tanggal Pengajuan,Tanggal Izin,Nama Siswa,NIS,Kelas,Jenis Izin,Alasan,Status,Keterangan Guru,Tanggal Respon,Mata Pelajaran,Guru,Jadwal,Bukti Pendukung\n';
+      let csvContent = "\uFEFF"; // UTF-8 BOM
+      csvContent +=
+        "Tanggal Pengajuan,Tanggal Izin,Nama Siswa,NIS,Kelas,Jenis Izin,Alasan,Status,Keterangan Guru,Tanggal Respon,Mata Pelajaran,Guru,Jadwal,Bukti Pendukung\n";
         
-        rows.forEach(row => {
+      rows.forEach((row) => {
             csvContent += `"${row.tanggal_pengajuan}","${row.tanggal_izin}","${row.nama_siswa}","${row.nis}","${row.nama_kelas}","${row.jenis_izin}","${row.alasan}","${row.status}","${row.keterangan_guru}","${row.tanggal_respon}","${row.nama_mapel}","${row.nama_guru}","${row.jadwal}","${row.bukti_pendukung}"\n`;
         });
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="riwayat-pengajuan-izin-${startDate || 'all'}-${endDate || 'all'}.csv"`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="riwayat-pengajuan-izin-${startDate || "all"}-${
+          endDate || "all"
+        }.csv"`
+      );
         res.send(csvContent);
         
-        console.log(`✅ Riwayat pengajuan izin report downloaded successfully: ${rows.length} records`);
+      console.log(
+        `✅ Riwayat pengajuan izin report downloaded successfully: ${rows.length} records`
+      );
     } catch (error) {
-        console.error('❌ Error downloading riwayat pengajuan izin report:', error);
-        res.status(500).json({ error: 'Internal server error' });
+      console.error(
+        "❌ Error downloading riwayat pengajuan izin report:",
+        error
+      );
+      res.status(500).json({ error: "Internal server error" });
     }
-});
+  }
+);
 
 // Handle graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('🛑 Shutting down server...');
+process.on("SIGINT", async () => {
+  console.log("🛑 Shutting down server...");
     if (connection) {
         await connection.end();
-        console.log('✅ Database connection closed');
+    console.log("✅ Database connection closed");
     }
     process.exit(0);
 });

@@ -9,7 +9,8 @@
     "start:prod": "NODE_ENV=production node server_modern.js",
     "dev": "node server_modern.js",
     "setup-db": "node setup-railway-database.js",
-    "test-connection": "node test-railway-connection.js"
+    "test-connection": "node test-railway-connection.js",
+    "test-endpoints": "node test-endpoints.js"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -25,7 +26,13 @@
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
   },
-  "keywords": ["absenta", "attendance", "school", "railway", "backend"],
+  "keywords": [
+    "absenta",
+    "attendance",
+    "school",
+    "railway",
+    "backend"
+  ],
   "author": "ABSENTA Team",
   "license": "ISC"
 }
